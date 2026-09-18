@@ -46,9 +46,18 @@ input[type=text], input[type=number], select {
 
 .swatch { display: inline-block; width: 14px; height: 14px; border: 1px solid #888; vertical-align: middle; }
 
+#paletteTabs { display: flex; margin-top: 6px; }
+.paletteTab {
+    flex: 1; border-radius: 0; margin-left: -1px; padding: 4px 0; font-size: 12px;
+}
+.paletteTab:first-child { border-radius: 3px 0 0 3px; margin-left: 0; }
+.paletteTab:last-child { border-radius: 0 3px 3px 0; }
+.paletteTab.active { background: #2a6f4a; border-color: #3a8f5f; position: relative; z-index: 1; }
+
 #paletteGrid {
     display: grid; grid-template-columns: repeat(8, 1fr); gap: 2px; margin-top: 6px;
 }
+#paletteGrid.secam { grid-template-columns: repeat(4, 1fr); gap: 4px; }
 #paletteGrid .cell {
     width: 100%; aspect-ratio: 1; cursor: pointer; border: 1px solid rgba(0,0,0,0.4);
 }
@@ -85,6 +94,38 @@ dialog label input, dialog label select { margin-left: 6px; }
 .previewRow { margin-top: 10px; background: #000; padding: 8px; display: flex; justify-content: center; }
 .previewRow canvas { image-rendering: pixelated; max-width: 100%; }
 #exportOutput { width: 100%; height: 300px; font-family: Consolas, monospace; font-size: 12px; margin-top: 8px; }
+
+.layerImportDialog { width: 520px; }
+.layerImportDialog p.hint { margin: 4px 0; }
+.ilToolbar { display: flex; gap: 6px; margin: 8px 0 4px; }
+#ilList { max-height: 46vh; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+.ilRow {
+    display: flex; align-items: center; gap: 10px; margin: 0; padding: 5px 6px;
+    background: #2b2b2b; border-radius: 3px; cursor: pointer;
+}
+.ilRow input { margin: 0; }
+.ilRow .ilName { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ilRow canvas {
+    width: auto; height: auto; max-width: 150px; max-height: 52px;
+    background: #000; image-rendering: pixelated; border: 1px solid #444;
+}
+
+.docDialog { width: 780px; max-width: 94vw; }
+.docBody { max-height: 72vh; overflow-y: auto; padding-right: 8px; line-height: 1.55; }
+.docBody h1 { font-size: 22px; margin: 0 0 10px; }
+.docBody h2 { font-size: 17px; margin: 22px 0 8px; padding-bottom: 4px; border-bottom: 1px solid #444; }
+.docBody h3 { font-size: 14px; margin: 16px 0 6px; }
+.docBody p { margin: 8px 0; }
+.docBody ul, .docBody ol { margin: 8px 0; padding-left: 22px; }
+.docBody li { margin: 3px 0; }
+.docBody a { color: #6cb6ff; }
+.docBody code { background: #1c1c1c; border: 1px solid #3a3a3a; border-radius: 3px; padding: 0 4px; font-family: Consolas, monospace; font-size: 12px; }
+.docBody pre { background: #1c1c1c; border: 1px solid #3a3a3a; border-radius: 4px; padding: 10px; overflow-x: auto; }
+.docBody pre code { background: none; border: none; padding: 0; }
+.docBody table { border-collapse: collapse; margin: 10px 0; width: 100%; }
+.docBody th, .docBody td { border: 1px solid #444; padding: 5px 8px; text-align: left; vertical-align: top; }
+.docBody th { background: #2f2f2f; }
+.docBody pre.plain { white-space: pre-wrap; border: none; background: transparent; padding: 0; font-family: Consolas, monospace; font-size: 12px; line-height: 1.5; }
 
 .contextMenu {
     position: fixed; z-index: 1000; display: none; flex-direction: column;
