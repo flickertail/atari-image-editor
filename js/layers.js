@@ -321,6 +321,48 @@ const Doc = {
         };
     },
 
+    // Validates parsed project JSON (the format Save Project writes) before
+    // anything is imported from it. Returns an error message, or null if OK.
+    checkProjectData(data) {
+        if (!data || typeof data !== "object") return "This isn't a project file.";
+        const { widthBytes: w, heightRows: h, layers } = data;
+        if (!Number.isInteger(w) || !Number.isInteger(h) || w < 1 || h < 1 || w > 40 || h > 262) {
+            return "This doesn't look like an Atari Image Editor project (missing or invalid canvas size).";
+        }
+        if (!Array.isArray(layers) || layers.length === 0) return "This project has no layers.";
+        for (let i = 0; i < layers.length; i++) {
+            const l = layers[i];
+            if (!l || !Array.isArray(l.colorGrid) || !Array.isArray(l.maskGrid) ||
+                l.colorGrid.length !== w * h || l.maskGrid.length !== w * h) {
+                return `Layer ${i + 1} ("${l && l.name}") has damaged data.`;
+            }
+        }
+        return null;
+    },
+
+    // Adds a copy of a layer from ANOTHER project (already validated by
+    // checkProjectData) on top of `doc`'s stack. The two canvases can differ
+    // in size; nothing is scaled, since the data is hardware bytes - the
+    // layer is placed at the top-left, and anything outside `doc`'s canvas
+    // is cropped (rows/groups `doc` doesn't have are simply left empty).
+    importForeignLayer(doc, plain, srcWidthBytes, srcHeightRows) {
+        const layer = createLayer(doc.widthBytes, doc.heightRows, plain.name || "Imported");
+        layer.visible = plain.visible !== false;
+        const rows = Math.min(srcHeightRows, doc.heightRows);
+        const cols = Math.min(srcWidthBytes, doc.widthBytes);
+        for (let row = 0; row < rows; row++) {
+            for (let g = 0; g < cols; g++) {
+                const src = row * srcWidthBytes + g;
+                const dst = row * doc.widthBytes + g;
+                layer.colorGrid[dst] = plain.colorGrid[src];
+                layer.maskGrid[dst] = plain.maskGrid[src];
+            }
+        }
+        doc.layers.push(layer);
+        doc.activeLayerIndex = doc.layers.length - 1;
+        return layer;
+    },
+
     // Deep, independent copy of a document - used by the undo/redo history
     // stack (app.js) so later edits to `doc` can't mutate a stored snapshot.
     clone(doc) {

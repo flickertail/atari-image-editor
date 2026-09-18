@@ -122,15 +122,19 @@ function setupMoveNudge() {
 }
 
 // ---------- palette panel ----------
+const SECAM_COLOR_NAMES = ["black", "blue", "red", "magenta", "green", "cyan", "yellow", "white"];
+
 function buildPaletteGrid() {
     const el = $("paletteGrid");
     el.innerHTML = "";
-    for (let i = 0; i < 128; i++) {
+    el.classList.toggle("secam", Palette.mode === "SECAM");
+    for (let i = 0; i < Palette.count(); i++) {
         const byteValue = Palette.byteForIndex(i);
         const cell = document.createElement("div");
         cell.className = "cell";
         cell.style.background = Palette.cssForByte(byteValue);
-        cell.title = "0x" + byteValue.toString(16).padStart(2, "0");
+        cell.title = "0x" + byteValue.toString(16).padStart(2, "0") +
+            (Palette.mode === "SECAM" ? " (" + SECAM_COLOR_NAMES[i] + ")" : "");
         cell.dataset.byte = byteValue;
         cell.addEventListener("click", () => setCurrentColor(byteValue));
         el.appendChild(cell);
@@ -138,9 +142,32 @@ function buildPaletteGrid() {
     refreshPaletteSelection();
 }
 
+// Highlights the cell for the current color. Compared by palette index, not
+// raw byte, because in SECAM many different bytes are the same color.
 function refreshPaletteSelection() {
+    const currentIndex = Palette.indexForByte(currentColorByte);
     for (const cell of $("paletteGrid").children) {
-        cell.classList.toggle("selected", Number(cell.dataset.byte) === currentColorByte);
+        cell.classList.toggle("selected", Palette.indexForByte(Number(cell.dataset.byte)) === currentIndex);
+    }
+}
+
+// Switches which TV standard's palette colors are shown/picked/quantized
+// with. Only the view changes - color bytes stored in layers are untouched.
+function setPaletteMode(mode) {
+    if (!Palette.setMode(mode)) return;
+    for (const tab of document.querySelectorAll(".paletteTab")) {
+        const active = tab.dataset.palette === mode;
+        tab.classList.toggle("active", active);
+        tab.setAttribute("aria-selected", active ? "true" : "false");
+    }
+    buildPaletteGrid();
+    setCurrentColor(currentColorByte);
+    redraw();
+}
+
+function setupPaletteTabs() {
+    for (const tab of document.querySelectorAll(".paletteTab")) {
+        tab.addEventListener("click", () => setPaletteMode(tab.dataset.palette));
     }
 }
 
@@ -422,7 +449,7 @@ function renderRawGridPreview(canvasEl, widthBytes, heightRows, colorGrid, maskG
 // ---------- Save/Load Project ----------
 function setupProjectFile() {
     $("btnSaveProject").addEventListener("click", () => {
-        const json = JSON.stringify(Doc.toPlainObject(doc), null, 1);
+        const json = JSON.stringify(Object.assign({ palette: Palette.mode }, Doc.toPlainObject(doc)), null, 1);
         const baseName = (doc.layers[0] && doc.layers[0].name) || "atari_image";
         const suggestedName = baseName.replace(/[^a-z0-9_]+/gi, "_") + ".json";
         saveTextFileAs(json, suggestedName, "application/json", ".json", "Atari Image Project");
@@ -438,9 +465,123 @@ function setupProjectFile() {
         History.snapshotBeforeChange();
         doc = Doc.fromPlainObject(data);
         grid.setDoc(doc);
+        // Projects saved before PAL/SECAM existed have no palette field and
+        // were NTSC-only.
+        setPaletteMode(data.palette || "NTSC");
         renderLayerList();
         redraw();
         e.target.value = "";
+    });
+}
+
+// ---------- Import Layers from another project ----------
+// Pick a saved project (.json), choose which of its layers to bring in, and
+// they're added on top of the active project's stack (relative order kept).
+// Canvases can differ in size: nothing is scaled (the data is hardware
+// bytes) - layers land at the top-left and are cropped to the active canvas,
+// unless the user explicitly ticks "enlarge the active canvas".
+function setupLayerImport() {
+    const dlg = $("dlgImportLayers");
+    let pending = null; // { data } - the validated project being imported from
+
+    // Draws a layer at 1 real pixel = 2x1 canvas pixels (the Atari aspect),
+    // in the currently selected palette, on black.
+    function drawThumb(canvas, plain, data) {
+        const W = data.widthBytes, H = data.heightRows;
+        canvas.width = W * 8 * 2;
+        canvas.height = H;
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#000";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        for (let y = 0; y < H; y++) {
+            for (let g = 0; g < W; g++) {
+                const mask = plain.maskGrid[y * W + g];
+                if (!mask) continue;
+                ctx.fillStyle = Palette.cssForByte(plain.colorGrid[y * W + g]);
+                for (let bit = 0; bit < 8; bit++) {
+                    if (mask & (1 << (7 - bit))) ctx.fillRect((g * 8 + bit) * 2, y, 2, 1);
+                }
+            }
+        }
+    }
+
+    const boxes = () => [...$("ilList").querySelectorAll("input[type=checkbox]")];
+    const refreshApply = () => { $("ilApply").disabled = !boxes().some((b) => b.checked); };
+
+    function openDialog(data, fileName) {
+        pending = { data };
+        const sw = data.widthBytes, sh = data.heightRows;
+        $("ilSource").textContent =
+            `From "${fileName}": ${data.layers.length} layer${data.layers.length === 1 ? "" : "s"}, ` +
+            `${sw} bytes (${sw * 8} px) wide x ${sh} rows.`;
+
+        const sameSize = sw === doc.widthBytes && sh === doc.heightRows;
+        const bigger = sw > doc.widthBytes || sh > doc.heightRows;
+        $("ilSizeNote").textContent = sameSize
+            ? "Same canvas size as the active project, so layers line up exactly."
+            : `Different canvas size (the active project is ${doc.widthBytes} bytes / ${doc.widthBytes * 8} px x ` +
+              `${doc.heightRows} rows). Layers are placed at the top-left and anything outside the active canvas is cropped.`;
+        $("ilGrowRow").style.display = bigger ? "" : "none";
+        $("ilGrow").checked = false;
+
+        const list = $("ilList");
+        list.innerHTML = "";
+        // Same top-first order as the Layers panel.
+        for (let i = data.layers.length - 1; i >= 0; i--) {
+            const plain = data.layers[i];
+            const row = document.createElement("label");
+            row.className = "ilRow";
+            const box = document.createElement("input");
+            box.type = "checkbox";
+            box.checked = true;
+            box.dataset.index = i;
+            box.addEventListener("change", refreshApply);
+            const thumb = document.createElement("canvas");
+            drawThumb(thumb, plain, data);
+            const name = document.createElement("span");
+            name.className = "ilName";
+            name.textContent = (plain.name || "Layer") + (plain.visible === false ? " (hidden)" : "");
+            row.append(box, thumb, name);
+            list.appendChild(row);
+        }
+        refreshApply();
+        dlg.showModal();
+    }
+
+    $("btnImportLayers").addEventListener("click", () => $("importLayersFile").click());
+
+    $("importLayersFile").addEventListener("change", async (e) => {
+        const file = e.target.files[0];
+        e.target.value = "";
+        if (!file) return;
+        let data;
+        try { data = JSON.parse(await file.text()); } catch (err) { alert("Not a valid project file: " + err.message); return; }
+        const problem = Doc.checkProjectData(data);
+        if (problem) { alert(problem); return; }
+        openDialog(data, file.name);
+    });
+
+    $("ilAll").addEventListener("click", () => { boxes().forEach((b) => { b.checked = true; }); refreshApply(); });
+    $("ilNone").addEventListener("click", () => { boxes().forEach((b) => { b.checked = false; }); refreshApply(); });
+    $("ilCancel").addEventListener("click", () => { pending = null; dlg.close(); });
+
+    $("ilApply").addEventListener("click", () => {
+        if (!pending) return;
+        const { data } = pending;
+        const chosen = boxes().filter((b) => b.checked).map((b) => Number(b.dataset.index)).sort((a, b) => a - b);
+        if (chosen.length === 0) return;
+
+        History.snapshotBeforeChange();
+        if ($("ilGrow").checked && $("ilGrowRow").style.display !== "none") {
+            Doc.resizeDocument(doc, Math.max(doc.widthBytes, data.widthBytes), Math.max(doc.heightRows, data.heightRows));
+            grid.setDoc(doc);
+        }
+        for (const i of chosen) Doc.importForeignLayer(doc, data.layers[i], data.widthBytes, data.heightRows);
+
+        pending = null;
+        dlg.close();
+        renderLayerList();
+        redraw();
     });
 }
 
@@ -711,12 +852,56 @@ function setupExportDialog() {
     });
 }
 
+// ---------- Help / License viewer ----------
+// Fetches the real README.md / LICENSE files that ship alongside the editor
+// (so there's one source of truth for the docs) and shows them in a dialog.
+// README.md is rendered as Markdown; LICENSE is shown as plain text.
+function setupDocDialogs() {
+    const dlg = $("dlgDoc");
+    const body = $("docBody");
+
+    async function showDoc(file) {
+        body.textContent = "Loading...";
+        if (!dlg.open) dlg.showModal();
+        try {
+            const resp = await fetch(file, { cache: "no-cache" });
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const text = await resp.text();
+            if (file === "README.md") {
+                body.innerHTML = Markdown.render(text);
+            } else {
+                body.innerHTML = "";
+                const pre = document.createElement("pre");
+                pre.className = "plain";
+                pre.textContent = text;
+                body.appendChild(pre);
+            }
+            body.scrollTop = 0;
+        } catch (err) {
+            body.textContent = `Couldn't load ${file} (${err.message}). ` +
+                "If you opened index.html straight from disk, serve the folder over HTTP instead " +
+                "(for example: python -m http.server).";
+        }
+    }
+
+    $("btnHelp").addEventListener("click", () => showDoc("README.md"));
+    $("btnLicense").addEventListener("click", () => showDoc("LICENSE"));
+    $("docClose").addEventListener("click", () => dlg.close());
+    body.addEventListener("click", (e) => {
+        const a = e.target.closest("a[data-doc]");
+        if (!a) return;
+        e.preventDefault();
+        showDoc(a.dataset.doc);
+    });
+}
+
 // ---------- boot ----------
 function main() {
     grid = new GridCanvas($("gridCanvas"), doc);
     setupCanvasEvents();
     setupToolButtons();
     buildPaletteGrid();
+    setupPaletteTabs();
     setCurrentColor(0x1a);
     renderLayerList();
     redraw();
@@ -735,6 +920,8 @@ function main() {
     setupMoveNudge();
     setupContextMenu();
     setupProjectFile();
+    setupLayerImport();
+    setupDocDialogs();
 }
 
 main();
