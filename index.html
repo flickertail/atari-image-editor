@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Atari 2600 Image Editor</title>
+<link rel="stylesheet" href="css/style.css?v=2">
+</head>
+<body>
+<div id="topbar">
+    <span class="brand">Atari 2600 Image Editor</span>
+    <button id="btnNew">New Canvas</button>
+    <button id="btnSaveProject">Save Project</button>
+    <button id="btnLoadProject">Load Project</button>
+    <input type="file" id="loadProjectFile" accept=".json" style="display:none;">
+    <button id="btnImportImage">Import Image</button>
+    <button id="btnAddText">Add Text</button>
+    <button id="btnExport">Export .h</button>
+    <button id="btnUndo" title="Undo (Ctrl+Z)">Undo</button>
+    <button id="btnRedo" title="Redo (Ctrl+Y)">Redo</button>
+    <span class="spacer"></span>
+    <label>Zoom <input id="zoomRange" type="range" min="2" max="24" value="8"></label>
+    <label><input id="chkGroupLines" type="checkbox" checked> group lines</label>
+    <label><input id="chkRowLines" type="checkbox"> row lines</label>
+    <span id="docInfo" class="docInfo"></span>
+</div>
+
+<div id="main">
+    <div id="leftPanel">
+        <div class="panelTitle">Tools</div>
+        <div id="toolButtons">
+            <button class="tool active" data-tool="pencil" title="Pencil">Pencil</button>
+            <button class="tool" data-tool="eraser" title="Eraser">Eraser</button>
+            <button class="tool" data-tool="fill" title="Fill (Shift = erase-fill)">Fill</button>
+            <button class="tool" data-tool="eyedropper" title="Eyedropper">Eyedrop</button>
+            <button class="tool" data-tool="line" title="Line">Line</button>
+            <button class="tool" data-tool="rect" title="Rectangle outline">Rect</button>
+            <button class="tool" data-tool="rectFilled" title="Filled rectangle">Rect Fill</button>
+            <button class="tool" data-tool="rectErase" title="Erase a filled rectangle (mask only, colors untouched)">Rect Erase</button>
+            <button class="tool" data-tool="move" title="Move the active layer's whole content, 1px accurate. Drag, or use arrow keys (Shift = 8px step).">Move</button>
+        </div>
+
+        <div class="panelTitle">Color <span id="currentColorSwatch" class="swatch"></span> <span id="currentColorHex"></span></div>
+        <div id="paletteGrid"></div>
+    </div>
+
+    <div id="canvasArea">
+        <canvas id="gridCanvas"></canvas>
+    </div>
+
+    <div id="rightPanel">
+        <div class="panelTitle">Layers <button id="btnAddLayer" class="small">+ Add</button></div>
+        <div id="layerList"></div>
+    </div>
+</div>
+
+<!-- New Canvas dialog -->
+<dialog id="dlgNew">
+    <h3>New Canvas</h3>
+    <label>Width in bytes (groups of 8px)
+        <input id="newWidthBytes" type="number" min="1" max="40" value="6">
+        <span id="newWidthPx" class="hint"></span>
+    </label>
+    <label>Height in scanlines
+        <input id="newHeightRows" type="number" min="1" max="262" value="64">
+    </label>
+    <div class="dlgButtons">
+        <button id="newCancel">Cancel</button>
+        <button id="newCreate" class="primary">Create</button>
+    </div>
+</dialog>
+
+<!-- Import Image dialog -->
+<dialog id="dlgImport">
+    <h3>Import Image as Layer</h3>
+    <input id="importFile" type="file" accept="image/*">
+    <label><input id="importLineArt" type="checkbox" checked> Line art mode (2 colors only, no resizing)</label>
+    <div id="importLineArtOptions">
+        <label>Each source pixel row =
+            <select id="importRowScale">
+                <option value="1">1 scanline</option>
+                <option value="2">2 scanlines</option>
+            </select>
+        </label>
+        <p class="hint">Darker of the image's 2 colors is skipped; the lighter one is imported as a single color -
+            the nearest Atari palette entry to it. Placed at native size, top-left - use the Move tool after to reposition.</p>
+    </div>
+    <div id="importPhotoOptions">
+        <label>Fit mode
+            <select id="importFit">
+                <option value="stretch">Stretch to fill</option>
+                <option value="fit">Fit (letterbox)</option>
+                <option value="fill">Fill (crop)</option>
+            </select>
+        </label>
+        <label><input id="importDither" type="checkbox" checked> Dither (Floyd-Steinberg)</label>
+    </div>
+    <div class="previewRow">
+        <canvas id="importPreview"></canvas>
+    </div>
+    <div class="dlgButtons">
+        <button id="importCancel">Cancel</button>
+        <button id="importApply" class="primary">Add as Layer</button>
+    </div>
+</dialog>
+
+<!-- Add Text dialog -->
+<dialog id="dlgText">
+    <h3>Add Text as Layer</h3>
+    <label>Text <input id="textInput" type="text" value="HELLO"></label>
+    <label>Font family <input id="textFont" type="text" value="Arial" list="fontList">
+        <button id="btnRememberFont" type="button" class="small" title="Add the exact name typed above to the list below, so you don't have to retype it next time">+ Remember</button>
+    </label>
+    <label>Browse fonts <select id="textFontPicker"></select></label>
+    <div class="fontLoadRow">
+        <button id="btnLoadSystemFonts" type="button" class="small" title="Chrome/Edge only, needs a one-time permission">Load System Fonts</button>
+        <span id="systemFontsStatus" class="hint"></span>
+    </div>
+    <datalist id="fontList">
+        <option value="Arial"><option value="Courier New"><option value="Consolas">
+        <option value="Impact"><option value="Georgia"><option value="Verdana">
+    </datalist>
+    <label>Custom font file <input id="textCustomFont" type="file" accept=".ttf,.otf,.woff,.woff2"></label>
+    <label>Size (px) <input id="textSize" type="number" min="4" max="128" value="16"></label>
+    <label><input id="textBold" type="checkbox"> Bold</label>
+    <label><input id="textItalic" type="checkbox"> Italic</label>
+    <label>Position X <input id="textX" type="number" value="0"></label>
+    <label>Position Y <input id="textY" type="number" value="0"></label>
+    <div class="previewRow">
+        <canvas id="textPreview"></canvas>
+    </div>
+    <div class="dlgButtons">
+        <button id="textCancel">Cancel</button>
+        <button id="textApply" class="primary">Add as Layer</button>
+    </div>
+</dialog>
+
+<!-- Export dialog -->
+<dialog id="dlgExport">
+    <h3>Export .h</h3>
+    <label>Source
+        <select id="exportScope">
+            <option value="all">All layers</option>
+        </select>
+    </label>
+    <textarea id="exportOutput" readonly spellcheck="false"></textarea>
+    <div class="dlgButtons">
+        <button id="exportClose">Close</button>
+        <button id="exportCopy">Copy</button>
+        <button id="exportDownload" class="primary">Download .h</button>
+    </div>
+</dialog>
+
+<div id="contextMenu" class="contextMenu">
+    <button data-action="clearAll">Clear All</button>
+    <button data-action="clearColors">Clear Colors</button>
+    <button data-action="clearGeometry">Clear Geometry</button>
+</div>
+
+<script src="js/palette.js?v=2"></script>
+<script src="js/layers.js?v=5"></script>
+<script src="js/canvas.js?v=2"></script>
+<script src="js/tools.js?v=2"></script>
+<script src="js/imageImport.js?v=3"></script>
+<script src="js/textTool.js?v=2"></script>
+<script src="js/fontDetect.js?v=1"></script>
+<script src="js/exportC.js?v=2"></script>
+<script src="js/app.js?v=14"></script>
+</body>
+</html>
