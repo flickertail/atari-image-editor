@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <title>Atari 2600 Image Editor</title>
-<link rel="stylesheet" href="css/style.css?v=2">
+<link rel="stylesheet" href="css/style.css?v=5">
 </head>
 <body>
 <div id="topbar">
@@ -12,11 +12,15 @@
     <button id="btnSaveProject">Save Project</button>
     <button id="btnLoadProject">Load Project</button>
     <input type="file" id="loadProjectFile" accept=".json" style="display:none;">
+    <button id="btnImportLayers" title="Copy layers from another saved project into this one">Import Layers</button>
+    <input type="file" id="importLayersFile" accept=".json" style="display:none;">
     <button id="btnImportImage">Import Image</button>
     <button id="btnAddText">Add Text</button>
     <button id="btnExport">Export .h</button>
     <button id="btnUndo" title="Undo (Ctrl+Z)">Undo</button>
     <button id="btnRedo" title="Redo (Ctrl+Y)">Redo</button>
+    <button id="btnHelp" title="Show the README (how to use the editor)">Help</button>
+    <button id="btnLicense" title="Show the license">License</button>
     <span class="spacer"></span>
     <label>Zoom <input id="zoomRange" type="range" min="2" max="24" value="8"></label>
     <label><input id="chkGroupLines" type="checkbox" checked> group lines</label>
@@ -40,6 +44,11 @@
         </div>
 
         <div class="panelTitle">Color <span id="currentColorSwatch" class="swatch"></span> <span id="currentColorHex"></span></div>
+        <div id="paletteTabs" role="tablist" title="Which TV standard's palette to view and pick colors from. The color bytes are the same in all three; only how they look changes.">
+            <button class="paletteTab active" role="tab" data-palette="NTSC">NTSC</button>
+            <button class="paletteTab" role="tab" data-palette="PAL">PAL</button>
+            <button class="paletteTab" role="tab" data-palette="SECAM">SECAM</button>
+        </div>
         <div id="paletteGrid"></div>
     </div>
 
@@ -66,6 +75,23 @@
     <div class="dlgButtons">
         <button id="newCancel">Cancel</button>
         <button id="newCreate" class="primary">Create</button>
+    </div>
+</dialog>
+
+<!-- Import Layers (from another project) dialog -->
+<dialog id="dlgImportLayers" class="layerImportDialog">
+    <h3>Import Layers from Project</h3>
+    <p id="ilSource" class="hint"></p>
+    <p id="ilSizeNote" class="hint"></p>
+    <label id="ilGrowRow"><input id="ilGrow" type="checkbox"> Enlarge the active canvas to fit the imported layers</label>
+    <div class="ilToolbar">
+        <button id="ilAll" class="small" type="button">Select all</button>
+        <button id="ilNone" class="small" type="button">Select none</button>
+    </div>
+    <div id="ilList"></div>
+    <div class="dlgButtons">
+        <button id="ilCancel">Cancel</button>
+        <button id="ilApply" class="primary">Import selected layers</button>
     </div>
 </dialog>
 
@@ -150,20 +176,29 @@
     </div>
 </dialog>
 
+<!-- Help / License viewer (shows README.md or LICENSE fetched from the site) -->
+<dialog id="dlgDoc" class="docDialog">
+    <div id="docBody" class="docBody"></div>
+    <div class="dlgButtons">
+        <button id="docClose" class="primary">Close</button>
+    </div>
+</dialog>
+
 <div id="contextMenu" class="contextMenu">
     <button data-action="clearAll">Clear All</button>
     <button data-action="clearColors">Clear Colors</button>
     <button data-action="clearGeometry">Clear Geometry</button>
 </div>
 
-<script src="js/palette.js?v=2"></script>
-<script src="js/layers.js?v=5"></script>
+<script src="js/palette.js?v=3"></script>
+<script src="js/layers.js?v=6"></script>
 <script src="js/canvas.js?v=2"></script>
 <script src="js/tools.js?v=2"></script>
 <script src="js/imageImport.js?v=3"></script>
 <script src="js/textTool.js?v=2"></script>
 <script src="js/fontDetect.js?v=1"></script>
 <script src="js/exportC.js?v=2"></script>
-<script src="js/app.js?v=14"></script>
+<script src="js/markdown.js?v=1"></script>
+<script src="js/app.js?v=17"></script>
 </body>
 </html>
