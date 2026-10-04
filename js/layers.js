@@ -14,6 +14,11 @@
 
 let _nextLayerId = 1;
 
+// Canvas size limits (also the New / Resize Canvas dialogs'). Wider and taller
+// than one screen, for scrolling playfield worlds.
+const MAX_WIDTH_BYTES = 128;    // 1024 px = 256 playfield blocks
+const MAX_HEIGHT_ROWS = 1024;
+
 function createLayer(widthBytes, heightRows, name) {
     return {
         id: _nextLayerId++,
@@ -25,6 +30,7 @@ function createLayer(widthBytes, heightRows, name) {
 }
 
 function cloneLayer(layer, name) {
+    if (PF.isPlayfield(layer)) return PF.clone(layer, name);
     return {
         id: _nextLayerId++,
         name: name || (layer.name + " copy"),
@@ -100,7 +106,8 @@ const Doc = {
 
     resizeDocument(doc, widthBytes, heightRows) {
         for (const layer of doc.layers) {
-            resizeLayer(layer, widthBytes, heightRows, doc.widthBytes, doc.heightRows);
+            if (PF.isPlayfield(layer)) PF.resize(layer, widthBytes, heightRows);
+            else resizeLayer(layer, widthBytes, heightRows, doc.widthBytes, doc.heightRows);
         }
         doc.widthBytes = widthBytes;
         doc.heightRows = heightRows;
@@ -113,6 +120,7 @@ const Doc = {
     // implementation shortcut).
     setPixel(doc, layer, x, y, colorByte) {
         if (x < 0 || y < 0 || x >= this.widthPx(doc) || y >= doc.heightRows) return;
+        if (PF.isPlayfield(layer)) return PF.setPixel(layer, x, y, colorByte);
         const g = x >> 3;
         const bit = 7 - (x & 7);
         const idx = y * doc.widthBytes + g;
@@ -122,14 +130,19 @@ const Doc = {
 
     clearPixel(doc, layer, x, y) {
         if (x < 0 || y < 0 || x >= this.widthPx(doc) || y >= doc.heightRows) return;
+        if (PF.isPlayfield(layer)) return PF.clearPixel(layer, x, y);
         const g = x >> 3;
         const bit = 7 - (x & 7);
         const idx = y * doc.widthBytes + g;
         layer.maskGrid[idx] &= ~(1 << bit);
     },
 
-    // Returns { on, colorByte, group } for pixel (x,y) on `layer`.
-    getPixel(doc, layer, x, y) {
+    // Returns { on, colorByte, group } for pixel (x,y) on `layer`. For a
+    // playfield layer in Register colour mode, colorByte is what the TV shows
+    // there (see PF.previewRegion) unless `exactColor`, which gives the
+    // colour of the block's own register region.
+    getPixel(doc, layer, x, y, exactColor) {
+        if (PF.isPlayfield(layer)) return PF.getPixel(layer, x, y, exactColor);
         const g = x >> 3;
         const bit = 7 - (x & 7);
         const idx = y * doc.widthBytes + g;
@@ -261,6 +274,9 @@ const Doc = {
     // dst. `src` itself is left untouched so the tile can be moved and
     // stamped again. Returns how many cells were stamped.
     stampLayerOnto(src, dst) {
+        if (PF.isPlayfield(src) || PF.isPlayfield(dst)) {
+            return PF.isPlayfield(src) && PF.isPlayfield(dst) ? PF.stampOnto(src, dst) : 0;
+        }
         let stamped = 0;
         for (let i = 0; i < src.maskGrid.length; i++) {
             if (src.maskGrid[i] === 0) continue;
@@ -271,20 +287,65 @@ const Doc = {
         return stamped;
     },
 
+    // Copy/paste. copyRegion() takes the pixels of `layer` inside the
+    // rectangle (inclusive pixel/row bounds) as a plain clip: per pixel,
+    // whether it's on and its group's color byte. pasteAsLayer() puts a clip
+    // into a NEW layer, at the clip's own position, just above layer
+    // `index`, and makes it active. A pixel always lands in the same 8-pixel
+    // group it came from (same x), so every pasted group gets the exact
+    // color it had - nothing is merged or recolored. Off pixels stay
+    // transparent.
+    copyRegion(doc, layer, x0, y0, x1, y1) {
+        const minX = Math.max(0, Math.min(x0, x1)), maxX = Math.min(this.widthPx(doc) - 1, Math.max(x0, x1));
+        const minY = Math.max(0, Math.min(y0, y1)), maxY = Math.min(doc.heightRows - 1, Math.max(y0, y1));
+        const w = maxX - minX + 1, h = maxY - minY + 1;
+        const on = new Uint8Array(w * h), color = new Uint8Array(w * h);
+        for (let y = 0; y < h; y++) {
+            for (let x = 0; x < w; x++) {
+                const p = this.getPixel(doc, layer, minX + x, minY + y, true);
+                on[y * w + x] = p.on ? 1 : 0;
+                color[y * w + x] = p.colorByte;
+            }
+        }
+        // A playfield clip pastes back as a playfield layer with the same settings.
+        const pf = PF.isPlayfield(layer) ? { size: layer.size, half: layer.half, colorMode: layer.colorMode } : null;
+        return { x: minX, y: minY, w, h, on, color, from: layer.name, pf };
+    },
+
+    pasteAsLayer(doc, clip, index) {
+        let layer;
+        if (clip.pf) {
+            layer = PF.create(doc, clip.from + " paste", clip.pf.size);
+            layer.half = clip.pf.half;
+            layer.colorMode = clip.pf.colorMode;
+        } else {
+            layer = createLayer(doc.widthBytes, doc.heightRows, clip.from + " paste");
+        }
+        for (let y = 0; y < clip.h; y++) {
+            for (let x = 0; x < clip.w; x++) {
+                const i = y * clip.w + x;
+                if (clip.on[i]) this.setPixel(doc, layer, clip.x + x, clip.y + y, clip.color[i]);
+            }
+        }
+        doc.layers.splice(index + 1, 0, layer);
+        doc.activeLayerIndex = index + 1;
+        return layer;
+    },
+
     // Whole-layer clears, for the canvas right-click menu. "Colors" and
     // "Geometry" (the mask) are cleared independently since they're
     // independent hardware data per the layer model above.
     clearLayerAll(layer) {
-        layer.colorGrid.fill(0);
-        layer.maskGrid.fill(0);
+        this.clearLayerColors(layer);
+        this.clearLayerGeometry(layer);
     },
 
     clearLayerColors(layer) {
-        layer.colorGrid.fill(0);
+        (PF.isPlayfield(layer) ? layer.colors : layer.colorGrid).fill(0);
     },
 
     clearLayerGeometry(layer) {
-        layer.maskGrid.fill(0);
+        (PF.isPlayfield(layer) ? layer.blocks : layer.maskGrid).fill(0);
     },
 
     // Plain-JSON-serializable form of a document, for Save/Load Project
@@ -296,7 +357,7 @@ const Doc = {
             heightRows: doc.heightRows,
             bgColorByte: doc.bgColorByte,
             activeLayerIndex: doc.activeLayerIndex,
-            layers: doc.layers.map((layer) => ({
+            layers: doc.layers.map((layer) => PF.isPlayfield(layer) ? PF.toPlain(layer) : ({
                 name: layer.name,
                 visible: layer.visible,
                 colorGrid: Array.from(layer.colorGrid),
@@ -311,7 +372,7 @@ const Doc = {
             heightRows: data.heightRows,
             bgColorByte: data.bgColorByte || 0,
             activeLayerIndex: data.activeLayerIndex || 0,
-            layers: data.layers.map((l) => ({
+            layers: data.layers.map((l) => l.kind === "playfield" ? PF.fromPlain(l) : ({
                 id: _nextLayerId++,
                 name: l.name,
                 visible: l.visible !== false,
@@ -326,12 +387,17 @@ const Doc = {
     checkProjectData(data) {
         if (!data || typeof data !== "object") return "This isn't a project file.";
         const { widthBytes: w, heightRows: h, layers } = data;
-        if (!Number.isInteger(w) || !Number.isInteger(h) || w < 1 || h < 1 || w > 40 || h > 262) {
+        if (!Number.isInteger(w) || !Number.isInteger(h) || w < 1 || h < 1 || w > MAX_WIDTH_BYTES || h > MAX_HEIGHT_ROWS) {
             return "This doesn't look like an Atari Image Editor project (missing or invalid canvas size).";
         }
         if (!Array.isArray(layers) || layers.length === 0) return "This project has no layers.";
         for (let i = 0; i < layers.length; i++) {
             const l = layers[i];
+            if (l && l.kind === "playfield") {
+                const problem = PF.check(l, w, h, i);
+                if (problem) return problem;
+                continue;
+            }
             if (!l || !Array.isArray(l.colorGrid) || !Array.isArray(l.maskGrid) ||
                 l.colorGrid.length !== w * h || l.maskGrid.length !== w * h) {
                 return `Layer ${i + 1} ("${l && l.name}") has damaged data.`;
@@ -346,6 +412,12 @@ const Doc = {
     // layer is placed at the top-left, and anything outside `doc`'s canvas
     // is cropped (rows/groups `doc` doesn't have are simply left empty).
     importForeignLayer(doc, plain, srcWidthBytes, srcHeightRows) {
+        if (plain.kind === "playfield") {
+            const pfLayer = PF.importForeign(doc, plain, srcHeightRows);
+            doc.layers.push(pfLayer);
+            doc.activeLayerIndex = doc.layers.length - 1;
+            return pfLayer;
+        }
         const layer = createLayer(doc.widthBytes, doc.heightRows, plain.name || "Imported");
         layer.visible = plain.visible !== false;
         const rows = Math.min(srcHeightRows, doc.heightRows);
@@ -371,7 +443,7 @@ const Doc = {
             heightRows: doc.heightRows,
             bgColorByte: doc.bgColorByte,
             activeLayerIndex: doc.activeLayerIndex,
-            layers: doc.layers.map((layer) => ({
+            layers: doc.layers.map((layer) => PF.isPlayfield(layer) ? PF.snapshot(layer) : ({
                 id: layer.id,
                 name: layer.name,
                 visible: layer.visible,

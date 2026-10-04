@@ -3,12 +3,13 @@
 <head>
 <meta charset="UTF-8">
 <title>Atari 2600 Image Editor</title>
-<link rel="stylesheet" href="css/style.css?v=5">
+<link rel="stylesheet" href="css/style.css?v=6">
 </head>
 <body>
 <div id="topbar">
     <span class="brand">Atari 2600 Image Editor</span>
     <button id="btnNew">New Canvas</button>
+    <button id="btnResize" title="Make the canvas wider/narrower or taller/shorter, keeping all layers' content">Resize Canvas</button>
     <button id="btnSaveProject">Save Project</button>
     <button id="btnLoadProject">Load Project</button>
     <input type="file" id="loadProjectFile" accept=".json" style="display:none;">
@@ -19,6 +20,8 @@
     <button id="btnExport">Export .h</button>
     <button id="btnUndo" title="Undo (Ctrl+Z)">Undo</button>
     <button id="btnRedo" title="Redo (Ctrl+Y)">Redo</button>
+    <button id="btnCopy" title="Copy the selected area of the active layer (Ctrl+C) - make a selection with the Select tool first">Copy</button>
+    <button id="btnPaste" title="Paste the copied pixels into a new layer, at the same position (Ctrl+V)">Paste</button>
     <button id="btnHelp" title="Show the README (how to use the editor)">Help</button>
     <button id="btnLicense" title="Show the license">License</button>
     <span class="spacer"></span>
@@ -41,6 +44,8 @@
             <button class="tool" data-tool="rectFilled" title="Filled rectangle">Rect Fill</button>
             <button class="tool" data-tool="rectErase" title="Erase a filled rectangle (mask only, colors untouched)">Rect Erase</button>
             <button class="tool" data-tool="move" title="Move the active layer's whole content, 1px accurate. Drag, or use arrow keys (Shift = 8px step).">Move</button>
+            <button class="tool" data-tool="camera" title="World playfield layers: set the selected camera view's point (top-left) by clicking or dragging, or with the arrow keys (Shift = 8)">Camera</button>
+            <button class="tool" data-tool="select" title="Select a rectangle to copy (Ctrl+C), then paste it into a new layer (Ctrl+V). Click without dragging, or press Esc, to clear it.">Select</button>
         </div>
 
         <div class="panelTitle">Color <span id="currentColorSwatch" class="swatch"></span> <span id="currentColorHex"></span></div>
@@ -57,7 +62,7 @@
     </div>
 
     <div id="rightPanel">
-        <div class="panelTitle">Layers <button id="btnAddLayer" class="small">+ Add</button></div>
+        <div class="panelTitle">Layers <span><button id="btnAddLayer" class="small" title="Add a sprite layer">+ Sprite</button> <button id="btnAddPlayfield" class="small" title="Add a playfield layer (40 blocks of 4 px; set Screen or World, right half and colour mode in its settings)">+ Playfield</button></span></div>
         <div id="layerList"></div>
     </div>
 </div>
@@ -66,15 +71,33 @@
 <dialog id="dlgNew">
     <h3>New Canvas</h3>
     <label>Width in bytes (groups of 8px)
-        <input id="newWidthBytes" type="number" min="1" max="40" value="6">
+        <input id="newWidthBytes" type="number" min="1" max="128" value="6">
         <span id="newWidthPx" class="hint"></span>
     </label>
     <label>Height in scanlines
-        <input id="newHeightRows" type="number" min="1" max="262" value="64">
+        <input id="newHeightRows" type="number" min="1" max="1024" value="64">
     </label>
     <div class="dlgButtons">
         <button id="newCancel">Cancel</button>
         <button id="newCreate" class="primary">Create</button>
+    </div>
+</dialog>
+
+<!-- Resize Canvas dialog -->
+<dialog id="dlgResize">
+    <h3>Resize Canvas</h3>
+    <label>Width in bytes (groups of 8px)
+        <input id="resizeWidthBytes" type="number" min="1" max="128" value="6">
+        <span id="resizeWidthPx" class="hint"></span>
+    </label>
+    <label>Height in scanlines
+        <input id="resizeHeightRows" type="number" min="1" max="1024" value="64">
+    </label>
+    <p class="hint">Every layer keeps its content; anything outside the new size is cropped. A full screen is
+        20 bytes (160 px = 40 playfield blocks); World playfield layers follow the canvas width.</p>
+    <div class="dlgButtons">
+        <button id="resizeCancel">Cancel</button>
+        <button id="resizeApply" class="primary">Resize</button>
     </div>
 </dialog>
 
@@ -191,14 +214,15 @@
 </div>
 
 <script src="js/palette.js?v=3"></script>
-<script src="js/layers.js?v=6"></script>
-<script src="js/canvas.js?v=2"></script>
+<script src="js/layers.js?v=8"></script>
+<script src="js/playfield.js?v=1"></script>
+<script src="js/canvas.js?v=4"></script>
 <script src="js/tools.js?v=2"></script>
 <script src="js/imageImport.js?v=3"></script>
 <script src="js/textTool.js?v=2"></script>
 <script src="js/fontDetect.js?v=1"></script>
-<script src="js/exportC.js?v=2"></script>
-<script src="js/markdown.js?v=1"></script>
-<script src="js/app.js?v=17"></script>
+<script src="js/exportC.js?v=3"></script>
+<script src="js/markdown.js?v=2"></script>
+<script src="js/app.js?v=20"></script>
 </body>
 </html>

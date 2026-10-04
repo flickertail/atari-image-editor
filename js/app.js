@@ -9,6 +9,8 @@ let shapeStart = null;
 let moveOriginal = null;
 let pendingImportImg = null;
 let pendingTextRender = null;
+let selection = null;   // Select tool's rectangle {x0, y0, x1, y1} (inclusive pixel/row corners), or null
+let clipboard = null;   // last Copy, from Doc.copyRegion()
 
 const $ = (id) => document.getElementById(id);
 
@@ -95,7 +97,63 @@ function setupHistory() {
         const key = e.key.toLowerCase();
         if (key === "z" && !e.shiftKey) { e.preventDefault(); History.undo(); }
         else if (key === "y" || (key === "z" && e.shiftKey)) { e.preventDefault(); History.redo(); }
+        else if (key === "c") { e.preventDefault(); copySelection(); }
+        else if (key === "v") { e.preventDefault(); pasteAsNewLayer(); }
     });
+}
+
+// ---------- Select tool: copy / paste to a new layer ----------
+function copySelection() {
+    if (!selection) return;
+    const layer = Doc.activeLayer(doc);
+    clipboard = Doc.copyRegion(doc, layer, selection.x0, selection.y0, selection.x1, selection.y1);
+    updateClipboardButtons();
+}
+
+function pasteAsNewLayer() {
+    if (!clipboard) return;
+    History.snapshotBeforeChange();
+    Doc.pasteAsLayer(doc, clipboard, doc.activeLayerIndex);
+    renderLayerList();
+    redraw();
+}
+
+function updateClipboardButtons() {
+    $("btnCopy").disabled = !selection;
+    $("btnPaste").disabled = !clipboard;
+}
+
+function setupClipboard() {
+    $("btnCopy").addEventListener("click", copySelection);
+    $("btnPaste").addEventListener("click", pasteAsNewLayer);
+    window.addEventListener("keydown", (e) => {
+        if (e.key !== "Escape" || !selection) return;
+        if (document.querySelector("dialog[open]")) return;
+        selection = null;
+        updateClipboardButtons();
+        redraw();
+    });
+    updateClipboardButtons();
+}
+
+// Dashed outline around the selection (clamped, in case the canvas shrank).
+function drawSelection() {
+    if (!selection) return;
+    const maxX = Doc.widthPx(doc) - 1, maxY = doc.heightRows - 1;
+    const x0 = Math.min(Math.min(selection.x0, selection.x1), maxX), x1 = Math.min(Math.max(selection.x0, selection.x1), maxX);
+    const y0 = Math.min(Math.min(selection.y0, selection.y1), maxY), y1 = Math.min(Math.max(selection.y0, selection.y1), maxY);
+    const ctx = grid.ctx;
+    const left = x0 * grid.cellW + 0.5, top = y0 * grid.cellH + 0.5;
+    const w = (x1 - x0 + 1) * grid.cellW - 1, h = (y1 - y0 + 1) * grid.cellH - 1;
+    ctx.save();
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.strokeStyle = "#000";
+    ctx.strokeRect(left, top, w, h);
+    ctx.lineDashOffset = 4;
+    ctx.strokeStyle = "#fff";
+    ctx.strokeRect(left, top, w, h);
+    ctx.restore();
 }
 
 // ---------- Move tool: arrow-key nudging ----------
@@ -116,9 +174,87 @@ function setupMoveNudge() {
         e.preventDefault();
         const layer = Doc.activeLayer(doc);
         History.snapshotBeforeChange();
-        Doc.shiftLayerFrom(doc, layer, layer.colorGrid, layer.maskGrid, dxPixels, dyRows);
+        shiftActiveLayer(layer, snapshotLayerContent(layer), dxPixels, dyRows, true);
         redraw();
     });
+}
+
+// The Move tool's source snapshot, and the shift itself, for either kind of
+// layer. Playfield layers move by whole 4-pixel blocks: a drag rounds to the
+// nearest block, an arrow key moves one block (Shift = 8).
+function snapshotLayerContent(layer) {
+    return PF.isPlayfield(layer)
+        ? { blocks: layer.blocks.slice(), colors: layer.colors.slice() }
+        : { colorGrid: layer.colorGrid.slice(), maskGrid: layer.maskGrid.slice() };
+}
+
+function shiftActiveLayer(layer, original, dxPixels, dyRows, fromKeys) {
+    if (PF.isPlayfield(layer)) {
+        PF.shiftFrom(layer, original.blocks, original.colors, fromKeys ? dxPixels * PF.BLOCK_PX : dxPixels, dyRows);
+    } else {
+        Doc.shiftLayerFrom(doc, layer, original.colorGrid, original.maskGrid, dxPixels, dyRows);
+    }
+}
+
+// ---------- Camera tool: a World playfield layer's camera views ----------
+// A view is just an (x in blocks, y in rows) point - the top-left of what the
+// game shows from there. The Camera tool sets the selected view's point by
+// clicking/dragging on the canvas, or with the arrow keys (Shift = 8).
+function activeWorldLayer() {
+    const layer = Doc.activeLayer(doc);
+    return PF.isPlayfield(layer) && layer.size === "world" && layer.views.length ? layer : null;
+}
+
+function setViewPoint(layer, x, y) {
+    const v = layer.views[layer.activeView];
+    if (!v) return;
+    v.x = Math.max(0, Math.min(layer.blocksW - 1, x));
+    v.y = Math.max(0, Math.min(doc.heightRows - 1, y));
+}
+
+function setupCameraKeys() {
+    window.addEventListener("keydown", (e) => {
+        if (currentTool !== "camera") return;
+        const tag = document.activeElement && document.activeElement.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+        if (document.querySelector("dialog[open]")) return;
+        const layer = activeWorldLayer();
+        if (!layer) return;
+        const step = e.shiftKey ? 8 : 1;
+        let dx = 0, dy = 0;
+        if (e.key === "ArrowLeft") dx = -step;
+        else if (e.key === "ArrowRight") dx = step;
+        else if (e.key === "ArrowUp") dy = -step;
+        else if (e.key === "ArrowDown") dy = step;
+        else return;
+        e.preventDefault();
+        History.snapshotBeforeChange();
+        const v = layer.views[layer.activeView];
+        setViewPoint(layer, v.x + dx, v.y + dy);
+        renderLayerList();
+        redraw();
+    });
+}
+
+// The selected view's guide frame: 40 blocks x 192 rows from its point (only
+// a guide - what a view really shows is up to the game).
+function drawViewGuide() {
+    const layer = activeWorldLayer();
+    if (!layer) return;
+    const v = layer.views[layer.activeView];
+    if (!v) return;
+    const ctx = grid.ctx;
+    const left = v.x * PF.BLOCK_PX * grid.cellW, top = v.y * grid.cellH;
+    const w = PF.GUIDE_BLOCKS * PF.BLOCK_PX * grid.cellW, h = PF.GUIDE_ROWS * grid.cellH;
+    ctx.save();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = "rgba(255, 210, 60, 0.95)";
+    ctx.strokeRect(left + 1, top + 1, w - 2, h - 2);
+    ctx.fillStyle = "rgba(255, 210, 60, 0.95)";
+    ctx.fillRect(left, top, Math.max(4, grid.cellW), Math.max(4, grid.cellH));
+    ctx.font = "12px sans-serif";
+    ctx.fillText(`${v.name} (${v.x}, ${v.y})`, left + 6, top + 14);
+    ctx.restore();
 }
 
 // ---------- palette panel ----------
@@ -194,6 +330,11 @@ function renderLayerList() {
         vis.addEventListener("click", (e) => e.stopPropagation());
         vis.addEventListener("change", () => { layer.visible = vis.checked; redraw(); });
 
+        const kind = document.createElement("span");
+        kind.className = "layerKind";
+        kind.textContent = PF.isPlayfield(layer) ? (layer.size === "world" ? "PF·W" : "PF") : "SPR";
+        kind.title = PF.isPlayfield(layer) ? (layer.size === "world" ? "Playfield layer (World)" : "Playfield layer (Screen)") : "Sprite layer";
+
         const nameInput = document.createElement("input");
         nameInput.type = "text";
         nameInput.value = layer.name;
@@ -215,8 +356,12 @@ function renderLayerList() {
             Doc.stampLayerOnto(layer, doc.layers[i - 1]);
             redraw();
         });
-        stampBtn.disabled = i === 0;
+        const below = doc.layers[i - 1];
+        const stampable = below && PF.isPlayfield(layer) === PF.isPlayfield(below) &&
+            (!PF.isPlayfield(layer) || (layer.size === below.size && layer.blocksW === below.blocksW));
+        stampBtn.disabled = !stampable;
         if (i === 0) stampBtn.title = "Nothing below this layer to stamp onto";
+        else if (!stampable) stampBtn.title = "Stamp needs the layer below to be the same kind (sprite / playfield, same size)";
         btns.appendChild(stampBtn);
         btns.appendChild(mkBtn("⧉", "Duplicate", () => { History.snapshotBeforeChange(); Doc.duplicateLayer(doc, i); renderLayerList(); redraw(); }));
         btns.appendChild(mkBtn("✕", "Delete", () => {
@@ -226,12 +371,100 @@ function renderLayerList() {
             Doc.removeLayer(doc, i); renderLayerList(); redraw();
         }));
 
-        row.addEventListener("click", () => { doc.activeLayerIndex = i; renderLayerList(); });
+        row.addEventListener("click", () => { doc.activeLayerIndex = i; renderLayerList(); redraw(); });
         row.appendChild(vis);
+        row.appendChild(kind);
         row.appendChild(nameInput);
         row.appendChild(btns);
         el.appendChild(row);
+        if (i === doc.activeLayerIndex && PF.isPlayfield(layer)) el.appendChild(playfieldSettings(layer));
     }
+}
+
+// The active playfield layer's settings, under its row in the Layers panel.
+function playfieldSettings(layer) {
+    const box = document.createElement("div");
+    box.className = "pfSettings";
+    box.addEventListener("click", (e) => e.stopPropagation());
+
+    function selectRow(label, title, options, value, onChange) {
+        const lab = document.createElement("label");
+        lab.title = title;
+        lab.append(label + " ");
+        const sel = document.createElement("select");
+        for (const [v, text] of options) {
+            const o = document.createElement("option");
+            o.value = v; o.textContent = text;
+            sel.appendChild(o);
+        }
+        sel.value = value;
+        sel.addEventListener("change", () => { History.snapshotBeforeChange(); onChange(sel.value); renderLayerList(); redraw(); });
+        lab.appendChild(sel);
+        box.appendChild(lab);
+    }
+
+    selectRow("Size", "Screen: exactly 40 blocks (one screen). World: as wide as the canvas, for scrolling maps - always asymmetric, one colour per row, with camera views.",
+        [["screen", "Screen (40 blocks)"], ["world", "World (canvas width)"]], layer.size,
+        (v) => PF.setSize(doc, layer, v));
+    if (layer.size === "screen") {
+        selectRow("Right half", "Repeat / Mirror: draw the left 20 blocks, the right half is generated (CTRLPF bit 0 = 0 / 1). Asymmetric: all 40 blocks, the kernel rewrites PF0-PF2 mid-line.",
+            [["asym", "Asymmetric"], ["repeat", "Repeat"], ["mirror", "Mirror"]], layer.half,
+            (v) => { layer.half = v; });
+        selectRow("Colour", "Row: one COLUPF per scanline. Score: left and right halves each their own colour (COLUP0 / COLUP1). Register: a colour per register region per scanline - the preview shows where the hardware really switches.",
+            [["row", "Per row"], ["score", "Score (left/right)"], ["register", "Per register"]], layer.colorMode,
+            (v) => { layer.colorMode = v; });
+        return box;
+    }
+
+    // World: camera views.
+    const title = document.createElement("div");
+    title.className = "pfViewsTitle";
+    title.textContent = "Camera views (x in blocks, y in rows)";
+    const addBtn = document.createElement("button");
+    addBtn.className = "small";
+    addBtn.textContent = "+ View";
+    addBtn.title = "Add a view at the selected view's point; then move it with the Camera tool or type x / y";
+    addBtn.addEventListener("click", () => {
+        History.snapshotBeforeChange();
+        const cur = layer.views[layer.activeView] || { x: 0, y: 0 };
+        layer.views.push({ name: "view" + layer.views.length, x: cur.x, y: cur.y });
+        layer.activeView = layer.views.length - 1;
+        renderLayerList(); redraw();
+    });
+    title.appendChild(addBtn);
+    box.appendChild(title);
+
+    layer.views.forEach((v, vi) => {
+        const r = document.createElement("div");
+        r.className = "pfView" + (vi === layer.activeView ? " active" : "");
+        r.title = "Click to select this view (shows its guide frame)";
+        r.addEventListener("click", () => { layer.activeView = vi; renderLayerList(); redraw(); });
+        const name = document.createElement("input");
+        name.type = "text"; name.value = v.name; name.className = "pfViewName";
+        name.addEventListener("change", () => { History.snapshotBeforeChange(); v.name = name.value || ("view" + vi); redraw(); });
+        const num = (val, max, set) => {
+            const n = document.createElement("input");
+            n.type = "number"; n.min = 0; n.max = max; n.value = val; n.className = "pfViewNum";
+            n.addEventListener("change", () => { History.snapshotBeforeChange(); set(Number(n.value) || 0); renderLayerList(); redraw(); });
+            return n;
+        };
+        const x = num(v.x, layer.blocksW - 1, (val) => { layer.activeView = vi; setViewPoint(layer, val, v.y); });
+        const y = num(v.y, doc.heightRows - 1, (val) => { layer.activeView = vi; setViewPoint(layer, v.x, val); });
+        const del = document.createElement("button");
+        del.textContent = "✕"; del.title = "Delete this view";
+        del.disabled = layer.views.length <= 1;
+        del.addEventListener("click", (e) => {
+            e.stopPropagation();
+            History.snapshotBeforeChange();
+            layer.views.splice(vi, 1);
+            layer.activeView = Math.min(layer.activeView, layer.views.length - 1);
+            renderLayerList(); redraw();
+        });
+        for (const el of [name, x, y]) el.addEventListener("click", (e) => e.stopPropagation());
+        r.append(name, "x", x, "y", y, del);
+        box.appendChild(r);
+    });
+    return box;
 }
 
 function setupLayerPanel() {
@@ -241,11 +474,22 @@ function setupLayerPanel() {
         renderLayerList();
         redraw();
     });
+    $("btnAddPlayfield").addEventListener("click", () => {
+        History.snapshotBeforeChange();
+        const layer = PF.create(doc, `Playfield ${doc.layers.length + 1}`, "screen");
+        doc.layers.push(layer);
+        doc.activeLayerIndex = doc.layers.length - 1;
+        renderLayerList();
+        redraw();
+    });
 }
 
 // ---------- canvas / drawing ----------
 function redraw() {
+    grid.showBlockLines = PF.isPlayfield(Doc.activeLayer(doc));
     grid.draw();
+    drawViewGuide();
+    drawSelection();
     $("docInfo").textContent = `${Doc.widthPx(doc)}x${doc.heightRows}px (${doc.widthBytes} bytes wide)`;
 }
 
@@ -297,10 +541,18 @@ function canvasMouseDown(e) {
 
     // Every tool below mutates the doc exactly once per mousedown-to-mouseup
     // gesture (shape tools commit on mouseup, but using the same doc
-    // snapshotted here) - eyedropper is the only read-only exception.
-    if (currentTool !== "eyedropper") History.snapshotBeforeChange();
+    // snapshotted here) - eyedropper and select are the read-only exceptions.
+    if (currentTool === "camera" && !activeWorldLayer()) { drawing = false; return; }
+    if (currentTool !== "eyedropper" && currentTool !== "select") History.snapshotBeforeChange();
 
-    if (currentTool === "pencil") {
+    if (currentTool === "camera") {
+        setViewPoint(activeWorldLayer(), p.x >> 2, p.y);
+        renderLayerList(); redraw();
+    } else if (currentTool === "select") {
+        shapeStart = p;
+        selection = { x0: p.x, y0: p.y, x1: p.x, y1: p.y };
+        redraw();
+    } else if (currentTool === "pencil") {
         Tools.setPixel(doc, layer, p.x, p.y, currentColorByte);
         lastPixel = p; redraw();
     } else if (currentTool === "eraser") {
@@ -316,7 +568,7 @@ function canvasMouseDown(e) {
         shapeStart = p;
     } else if (currentTool === "move") {
         shapeStart = p;
-        moveOriginal = { colorGrid: layer.colorGrid.slice(), maskGrid: layer.maskGrid.slice() };
+        moveOriginal = snapshotLayerContent(layer);
     }
 }
 
@@ -325,7 +577,13 @@ function canvasMouseMove(e) {
     const p = grid.pixelAt(e.offsetX, e.offsetY);
     if (!p) return;
 
-    if (currentTool === "pencil" && lastPixel) {
+    if (currentTool === "camera" && activeWorldLayer()) {
+        setViewPoint(activeWorldLayer(), p.x >> 2, p.y);
+        redraw();
+    } else if (currentTool === "select" && shapeStart) {
+        selection.x1 = p.x; selection.y1 = p.y;
+        redraw();
+    } else if (currentTool === "pencil" && lastPixel) {
         Tools.line(doc, Doc.activeLayer(doc), lastPixel.x, lastPixel.y, p.x, p.y, false, currentColorByte);
         lastPixel = p; redraw();
     } else if (currentTool === "eraser" && lastPixel) {
@@ -342,14 +600,19 @@ function canvasMouseMove(e) {
     } else if (currentTool === "move" && shapeStart && moveOriginal) {
         const dxPixels = p.x - shapeStart.x;
         const dyRows = p.y - shapeStart.y;
-        Doc.shiftLayerFrom(doc, Doc.activeLayer(doc), moveOriginal.colorGrid, moveOriginal.maskGrid, dxPixels, dyRows);
+        shiftActiveLayer(Doc.activeLayer(doc), moveOriginal, dxPixels, dyRows, false);
         redraw();
     }
 }
 
 function canvasMouseUp(e) {
     const p = grid.pixelAt(e.offsetX, e.offsetY) || lastPixel;
-    if (drawing && shapeStart && p) {
+    if (drawing && currentTool === "select" && shapeStart) {
+        // A plain click (no drag) clears the selection instead of selecting 1 pixel.
+        if (selection && selection.x0 === selection.x1 && selection.y0 === selection.y1) selection = null;
+        updateClipboardButtons();
+        redraw();
+    } else if (drawing && shapeStart && p) {
         const layer = Doc.activeLayer(doc);
         if (currentTool === "line") {
             Tools.line(doc, layer, shapeStart.x, shapeStart.y, p.x, p.y, false, currentColorByte);
@@ -360,6 +623,7 @@ function canvasMouseUp(e) {
         }
         redraw();
     }
+    if (drawing && currentTool === "camera") renderLayerList();
     drawing = false; lastPixel = null; shapeStart = null; moveOriginal = null;
 }
 
@@ -493,6 +757,18 @@ function setupLayerImport() {
         const ctx = canvas.getContext("2d");
         ctx.fillStyle = "#000";
         ctx.fillRect(0, 0, canvas.width, canvas.height);
+        if (plain.kind === "playfield") {
+            const layer = PF.fromPlain(plain);
+            for (let y = 0; y < H; y++) {
+                for (let x = 0; x < W * 8; x += 4) {
+                    const p = PF.getPixel(layer, x, y);
+                    if (!p.on) continue;
+                    ctx.fillStyle = Palette.cssForByte(p.colorByte);
+                    ctx.fillRect(x * 2, y, 8, 1);
+                }
+            }
+            return;
+        }
         for (let y = 0; y < H; y++) {
             for (let g = 0; g < W; g++) {
                 const mask = plain.maskGrid[y * W + g];
@@ -540,7 +816,9 @@ function setupLayerImport() {
             drawThumb(thumb, plain, data);
             const name = document.createElement("span");
             name.className = "ilName";
-            name.textContent = (plain.name || "Layer") + (plain.visible === false ? " (hidden)" : "");
+            name.textContent = (plain.name || "Layer") +
+                (plain.kind === "playfield" ? (plain.size === "world" ? " [playfield, world]" : " [playfield]") : "") +
+                (plain.visible === false ? " (hidden)" : "");
             row.append(box, thumb, name);
             list.appendChild(row);
         }
@@ -600,14 +878,55 @@ function setupNewDialog() {
     $("newWidthBytes").addEventListener("input", updateNewHint);
     $("newCancel").addEventListener("click", () => dlg.close());
     $("newCreate").addEventListener("click", () => {
-        const wb = Math.max(1, Math.min(40, Number($("newWidthBytes").value) || 6));
-        const hr = Math.max(1, Math.min(262, Number($("newHeightRows").value) || 64));
+        const wb = Math.max(1, Math.min(MAX_WIDTH_BYTES, Number($("newWidthBytes").value) || 6));
+        const hr = Math.max(1, Math.min(MAX_HEIGHT_ROWS, Number($("newHeightRows").value) || 64));
         History.snapshotBeforeChange();
         doc = createDocument(wb, hr);
         grid.setDoc(doc);
         renderLayerList();
         redraw();
         dlg.close();
+    });
+}
+
+// ---------- Resize Canvas dialog ----------
+// Grows or shrinks the canvas, keeping every layer's content (anything
+// outside the new size is cropped). World playfield layers follow the new
+// width; screen playfield layers stay 40 blocks.
+function setupResizeDialog() {
+    const dlg = $("dlgResize");
+    function hint() {
+        const wb = Number($("resizeWidthBytes").value) || 0;
+        $("resizeWidthPx").textContent = `(${wb * 8} px = ${wb * 2} playfield blocks)`;
+    }
+    $("btnResize").addEventListener("click", () => {
+        $("resizeWidthBytes").value = doc.widthBytes;
+        $("resizeHeightRows").value = doc.heightRows;
+        hint();
+        dlg.showModal();
+    });
+    $("resizeWidthBytes").addEventListener("input", hint);
+    $("resizeCancel").addEventListener("click", () => dlg.close());
+    $("resizeApply").addEventListener("click", () => {
+        const wb = Math.max(1, Math.min(MAX_WIDTH_BYTES, Number($("resizeWidthBytes").value) || doc.widthBytes));
+        const hr = Math.max(1, Math.min(MAX_HEIGHT_ROWS, Number($("resizeHeightRows").value) || doc.heightRows));
+        dlg.close();
+        if (wb === doc.widthBytes && hr === doc.heightRows) return;
+        History.snapshotBeforeChange();
+        Doc.resizeDocument(doc, wb, hr);
+        for (const layer of doc.layers) {
+            if (PF.isPlayfield(layer)) for (const v of layer.views) {
+                v.x = Math.min(v.x, Math.max(0, layer.blocksW - 1));
+                v.y = Math.min(v.y, hr - 1);
+            }
+        }
+        if (selection) {
+            selection.x0 = Math.min(selection.x0, wb * 8 - 1); selection.x1 = Math.min(selection.x1, wb * 8 - 1);
+            selection.y0 = Math.min(selection.y0, hr - 1); selection.y1 = Math.min(selection.y1, hr - 1);
+        }
+        grid.setDoc(doc);
+        renderLayerList();
+        redraw();
     });
 }
 
@@ -912,12 +1231,15 @@ function main() {
     $("chkRowLines").addEventListener("change", (e) => { grid.showRowLines = e.target.checked; redraw(); });
 
     setupNewDialog();
+    setupResizeDialog();
     setupImportDialog();
     setupTextDialog();
     setupExportDialog();
     setupLayerPanel();
     setupHistory();
+    setupClipboard();
     setupMoveNudge();
+    setupCameraKeys();
     setupContextMenu();
     setupProjectFile();
     setupLayerImport();

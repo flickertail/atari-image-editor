@@ -61,8 +61,24 @@ standard's palette you view and pick colors from.
 | Line / Rect / Rect Fill | Shapes, previewed live while you drag. |
 | Rect Erase | Erases a filled rectangle of pixels (mask only; colors untouched). |
 | Move | Shifts the active layer's whole content by exactly 1 pixel. Drag, or use the **arrow keys** (**Shift** = 8 pixels). |
+| Camera | World playfield layers only: sets the selected camera view's point (top-left). Click or drag on the canvas, or use the **arrow keys** (**Shift** = 8). |
+| Select | Drag a rectangle to select an area for **Copy** / **Paste** (below). A click without dragging, or **Esc**, clears it. |
 
 Everything draws on the **active layer** (click a layer in the right panel).
+
+### Copy and paste to a new layer
+
+1. Pick **Select** and drag a rectangle over the area you want.
+2. **Copy** (button, or **Ctrl+C**) takes the selected pixels of the
+   **active layer**, with their colors.
+3. **Paste** (button, or **Ctrl+V**) puts them into a **new layer** just above
+   the active one, at the same position, and makes it the active layer. Use
+   **Move** to slide it where you want it, or **Stamp** it onto the layer
+   below.
+
+Pasted pixels keep the exact color they had, and transparent pixels stay
+transparent. You can paste the same copy as many times as you like, and each
+paste is one **Undo** step.
 
 **Right-click** the canvas for *Clear All*, *Clear Colors* or *Clear
 Geometry* on the active layer. Colors and geometry are independent data, so
@@ -79,7 +95,62 @@ The **Help** button in the top bar shows this README inside the editor, and
 
 Layers stack bottom to top; the top-most visible layer wins per pixel in the
 preview. Each layer has a visibility checkbox, a name, and buttons to move it
-up/down, **Stamp**, duplicate, and delete.
+up/down, **Stamp**, duplicate, and delete. There are two kinds, and a project
+can mix them freely: **+ Sprite** adds a sprite layer (8-pixel groups, as
+described above) and **+ Playfield** adds a playfield layer. The small badge
+before each name says which it is: **SPR**, **PF** or **PF·W** (world).
+
+### Playfield layers
+
+The TIA playfield is **40 blocks** across the 160-pixel screen, so one block
+is **4 pixels** wide. Every tool paints whole blocks; **Move** moves by whole
+blocks (a drag snaps to the nearest block, an arrow key moves one block,
+**Shift** eight). Faint 4-pixel block lines show while a playfield layer is
+active. A playfield layer starts at x 0 and is cropped to the canvas; a full
+screen is a 20-byte (160 px) canvas.
+
+The active playfield layer's settings appear under its row:
+
+- **Size**
+  - **Screen** - exactly 40 blocks (one screen).
+  - **World** - as wide as the canvas (canvas pixels / 4 blocks), for
+    scrolling maps bigger than the screen. Always asymmetric, one colour per
+    row. Use **Resize Canvas** to make the world as big as you need.
+- **Right half** (Screen only)
+  - **Asymmetric** - all 40 blocks are yours; the kernel rewrites PF0-PF2
+    mid-line.
+  - **Repeat** / **Mirror** - draw either half; the other is the same blocks
+    repeated or mirrored (CTRLPF bit 0 = 0 / 1).
+- **Colour** (Screen only). Like a sprite group, painting a block recolours
+  its whole colour unit for that scanline:
+  - **Per row** - one COLUPF per scanline.
+  - **Score** - the left and right halves each have their own colour
+    (COLUP0 / COLUP1 in score mode - shared with the sprites on that line).
+  - **Per register** - a colour per register region per scanline (left PF0,
+    PF1, PF2, then right PF0, PF1, PF2), for a kernel that rewrites COLUPF
+    mid-line. A colour write can only take effect every 3 pixels (one CPU
+    cycle), so at x 48, 80, 96 and 128 (112 and 144 in Mirror, only 112
+    exact) the switch lands 1-2 pixels late. The preview shows that, as the
+    TV would.
+
+#### Camera views (World layers)
+
+A camera view is just a point: the top-left of what the game shows, **x in
+blocks** and **y in rows**. How much the game actually shows from there is up
+to the program; the editor's yellow guide frame assumes 40 blocks x 192 rows.
+
+- Every World layer starts with the view **default** at (0, 0).
+- **+ View** adds one; give it a name, then place it with the **Camera** tool
+  or by typing x and y. Click a view to select it and show its guide frame.
+- Views are saved in the project file and exported (below), so the program
+  can jump straight to a named spot on the map.
+
+### Resize Canvas
+
+**Resize Canvas** makes the canvas wider or narrower, taller or shorter, up to
+128 bytes (1024 px = 256 playfield blocks) by 1024 rows. Every layer keeps its
+content; anything outside the new size is cropped. World playfield layers
+follow the new width. (Very large canvases limit how far you can zoom in.)
 
 ### Stamp: build a tile sheet from separate tile designs
 
@@ -193,6 +264,45 @@ static const uint8_t title[TITLE_ROWS][2][TITLE_GROUPS] = {
   `#include <stdint.h>`, so you can include the same header from several
   `.c` files without link errors.
 - Ready to feed a kernel that writes `COLUPx`/`GRPx` per group per scanline.
+
+#### Playfield layers
+
+A **Screen** playfield layer exports the playfield registers per row, in the
+TIA's own bit order (PF0 uses bits 4-7, PF1 bits 7-0, PF2 bits 0-7), ready to
+write straight to the TIA, plus its colours:
+
+```c
+#define LEVEL_ROWS 192
+static const uint8_t level[LEVEL_ROWS][3] = {      // { PF0, PF1, PF2 }
+    {0x10,0x80,0x01}, // row 0                      // Asymmetric: [ROWS][6] = { PF0, PF1, PF2, PF0R, PF1R, PF2R }
+    ...
+};
+static const uint8_t level_color[LEVEL_ROWS] = { ... };   // Per row: COLUPF
+                                                           // Score: [ROWS][2] = { left, right }
+                                                           // Per register: [ROWS][6], screen order
+```
+
+A **World** playfield layer exports the whole map as a bitmap - each row's
+blocks packed 8 per byte, bit 7 = leftmost block - one colour per row, and
+its camera views, with an `enum` of their names:
+
+```c
+#define LEVEL1_ROWS 600
+#define LEVEL1_BLOCKS 120
+#define LEVEL1_ROW_BYTES 15
+#define LEVEL1_VIEWS 3
+static const uint8_t level1[LEVEL1_ROWS][LEVEL1_ROW_BYTES] = { ... };
+static const uint8_t level1_color[LEVEL1_ROWS] = { ... };
+enum { LEVEL1_VIEW_DEFAULT, LEVEL1_VIEW_CAVE, LEVEL1_VIEW_BOSS };
+static const uint16_t level1_views[LEVEL1_VIEWS][2] = {   // { x in blocks, y in rows }
+    { 0, 0 }, // default
+    { 40, 120 }, // cave
+    { 80, 0 }, // boss
+};
+```
+
+The kernel takes the 40 blocks it shows from a row (starting at the view's
+x, as the map scrolls) and repacks them into PF0/PF1/PF2 itself.
 
 ## Running it locally
 

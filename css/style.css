@@ -78,6 +78,21 @@ input[type=text], input[type=number], select {
 .layerRow input[type=text] { width: 100%; background: transparent; border: none; color: #ddd; padding: 0; }
 .layerRow .layerBtns { display: flex; gap: 2px; }
 .layerRow .layerBtns button { padding: 1px 5px; font-size: 11px; }
+.layerRow .layerKind { font-size: 10px; color: #9ab; min-width: 26px; text-align: center; }
+
+/* The active playfield layer's settings, under its row */
+.pfSettings {
+    display: flex; flex-direction: column; gap: 4px; margin: -2px 0 2px 14px; padding: 6px;
+    background: #262f2a; border: 1px solid #3a8f5f; border-top: none; border-radius: 0 0 3px 3px; font-size: 12px;
+}
+.pfSettings label { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+.pfSettings select { flex: 1; max-width: 170px; }
+.pfViewsTitle { display: flex; justify-content: space-between; align-items: center; margin-top: 2px; color: #bbb; }
+.pfView { display: flex; align-items: center; gap: 3px; padding: 2px 3px; border-radius: 3px; cursor: pointer; color: #999; }
+.pfView.active { background: #3a3420; outline: 1px solid #d8b440; }
+.pfView .pfViewName { flex: 1; min-width: 0; }
+.pfView .pfViewNum { width: 48px; }
+.pfView button { padding: 0 5px; font-size: 11px; }
 
 dialog {
     background: #262626; color: #ddd; border: 1px solid #555; border-radius: 6px;
