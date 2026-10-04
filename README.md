@@ -133,6 +133,13 @@ The active playfield layer's settings appear under its row:
     exact) the switch lands 1-2 pixels late. The preview shows that, as the
     TV would.
 
+**PF regions** (checkbox in the top bar, on by default) marks which register
+shows which blocks: a red **PF0**, green **PF1** and blue **PF2** strip across
+the top few scanlines of a Screen layer, or of a World layer's selected camera
+view. It follows the layer's type: Asymmetric (and World) shows PF0 PF1 PF2
+then PF0R PF1R PF2R; Repeat shows PF0 PF1 PF2 twice; Mirror shows the right
+half reversed, PF2 PF1 PF0. It's only a guide - not saved or exported.
+
 #### Camera views (World layers)
 
 A camera view is just a point: the top-left of what the game shows, **x in

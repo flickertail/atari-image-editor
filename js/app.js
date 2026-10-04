@@ -384,8 +384,70 @@ function drawViewGuide() {
     ctx.fillStyle = "rgba(255, 210, 60, 0.95)";
     ctx.fillRect(left, top, Math.max(4, grid.cellW), Math.max(4, grid.cellH));
     ctx.font = "12px sans-serif";
-    ctx.fillText(`${v.name} (${v.x}, ${v.y})`, left + 6, top + 14);
+    ctx.fillText(`${v.name} (${v.x}, ${v.y})`, left + 6, top + (showPfRegions ? pfRegionStripHeight() : 0) + 14);
     ctx.restore();
+}
+
+// ---------- PF regions guide ----------
+// Marks which register shows which blocks, across the top few scanlines of
+// the active playfield layer's screen: a World layer's selected camera view
+// (40 blocks from its point), or a Screen layer's 40 blocks. Display only.
+let showPfRegions = true;
+const PF_REGION_COLORS = ["rgba(255, 80, 80, 0.55)", "rgba(80, 210, 90, 0.55)", "rgba(80, 140, 255, 0.55)"];  // PF0, PF1, PF2
+
+// [first block, blocks, label, register 0-2] across one 40-block screen.
+function pfRegionLayout(layer) {
+    const left = [[0, 4, "PF0", 0], [4, 8, "PF1", 1], [12, 8, "PF2", 2]];
+    let right;
+    if (layer.size === "world" || layer.half === "asym") right = [[20, 4, "PF0R", 0], [24, 8, "PF1R", 1], [32, 8, "PF2R", 2]];
+    else if (layer.half === "repeat") right = [[20, 4, "PF0", 0], [24, 8, "PF1", 1], [32, 8, "PF2", 2]];
+    else right = [[20, 8, "PF2", 2], [28, 8, "PF1", 1], [36, 4, "PF0", 0]];   // Mirror: reversed
+    return left.concat(right);
+}
+
+function pfRegionStripHeight() {
+    return Math.max(3 * grid.cellH, 14);
+}
+
+function drawPfRegionStrip(layer, originBlock, originRow) {
+    const ctx = grid.ctx;
+    const bw = PF.BLOCK_PX * grid.cellW;
+    const top = originRow * grid.cellH;
+    const h = Math.min(pfRegionStripHeight(), (doc.heightRows - originRow) * grid.cellH);
+    if (h <= 0) return;
+    ctx.save();
+    ctx.font = "11px sans-serif";
+    ctx.textBaseline = "middle";
+    for (const [b0, n, label, reg] of pfRegionLayout(layer)) {
+        const x = (originBlock + b0) * bw, w = n * bw;
+        if (x >= grid.canvas.width) continue;
+        ctx.fillStyle = PF_REGION_COLORS[reg];
+        ctx.fillRect(x, top, w, h);
+        ctx.strokeStyle = "rgba(0, 0, 0, 0.75)";
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x + 0.5, top + 0.5, w - 1, h - 1);
+        const tw = ctx.measureText(label).width;
+        if (tw + 4 <= w && h >= 10) {
+            const tx = x + (w - tw) / 2, ty = top + h / 2;
+            ctx.fillStyle = "#000";
+            ctx.fillText(label, tx + 1, ty + 1);
+            ctx.fillStyle = "#fff";
+            ctx.fillText(label, tx, ty);
+        }
+    }
+    ctx.restore();
+}
+
+function drawPfRegions() {
+    if (!showPfRegions) return;
+    const layer = Doc.activeLayer(doc);
+    if (!PF.isPlayfield(layer)) return;
+    if (layer.size === "world") {
+        const v = layer.views[layer.activeView];
+        if (v) drawPfRegionStrip(layer, v.x, v.y);
+    } else {
+        drawPfRegionStrip(layer, 0, 0);
+    }
 }
 
 // ---------- palette panel ----------
@@ -619,6 +681,7 @@ function setupLayerPanel() {
 function redraw() {
     grid.showBlockLines = PF.isPlayfield(Doc.activeLayer(doc));
     grid.draw();
+    drawPfRegions();
     drawViewGuide();
     drawSelection();
     $("docInfo").textContent = `${Doc.widthPx(doc)}x${doc.heightRows}px (${doc.widthBytes} bytes wide)`;
@@ -1358,6 +1421,7 @@ function main() {
     setupZoomWheel();
     $("chkGroupLines").addEventListener("change", (e) => { grid.showGroupLines = e.target.checked; redraw(); });
     $("chkRowLines").addEventListener("change", (e) => { grid.showRowLines = e.target.checked; redraw(); });
+    $("chkPfRegions").addEventListener("change", (e) => { showPfRegions = e.target.checked; redraw(); });
 
     setupNewDialog();
     setupResizeDialog();
