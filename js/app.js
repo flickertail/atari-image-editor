@@ -392,7 +392,33 @@ function drawViewGuide() {
 // Marks which register shows which blocks, across the top few scanlines of
 // the active playfield layer's screen: a World layer's selected camera view
 // (40 blocks from its point), or a Screen layer's 40 blocks. Display only.
-let showPfRegions = true;
+// Off until turned on; the choice is remembered in this browser (a per-
+// browser convenience - if storage is unavailable it just starts off).
+const PF_REGIONS_KEY = "atariEditorPfRegions";
+let showPfRegions = false;
+
+function loadPfRegionsSetting() {
+    try { showPfRegions = localStorage.getItem(PF_REGIONS_KEY) === "1"; } catch { showPfRegions = false; }
+    $("chkPfRegions").checked = showPfRegions;
+}
+
+function setPfRegions(on) {
+    showPfRegions = on;
+    $("chkPfRegions").checked = on;
+    try { localStorage.setItem(PF_REGIONS_KEY, on ? "1" : "0"); } catch { /* not remembered - fine */ }
+    redraw();
+}
+
+// R toggles it (unless typing in a field, a dialog is open, or with Ctrl/Alt).
+function setupPfRegionsKey() {
+    window.addEventListener("keydown", (e) => {
+        if (e.key !== "r" && e.key !== "R") return;
+        if (e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
+        if (typingInField() || document.querySelector("dialog[open]")) return;
+        e.preventDefault();
+        setPfRegions(!showPfRegions);
+    });
+}
 const PF_REGION_COLORS = ["rgba(255, 80, 80, 0.55)", "rgba(80, 210, 90, 0.55)", "rgba(80, 140, 255, 0.55)"];  // PF0, PF1, PF2
 
 // [first block, blocks, label, register 0-2] across one 40-block screen.
@@ -1421,7 +1447,9 @@ function main() {
     setupZoomWheel();
     $("chkGroupLines").addEventListener("change", (e) => { grid.showGroupLines = e.target.checked; redraw(); });
     $("chkRowLines").addEventListener("change", (e) => { grid.showRowLines = e.target.checked; redraw(); });
-    $("chkPfRegions").addEventListener("change", (e) => { showPfRegions = e.target.checked; redraw(); });
+    loadPfRegionsSetting();
+    $("chkPfRegions").addEventListener("change", (e) => setPfRegions(e.target.checked));
+    setupPfRegionsKey();
 
     setupNewDialog();
     setupResizeDialog();

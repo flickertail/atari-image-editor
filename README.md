@@ -84,7 +84,8 @@ paste is one **Undo** step.
 Geometry* on the active layer. Colors and geometry are independent data, so
 you can clear one without the other.
 
-Other controls: **Ctrl+Z** undo, **Ctrl+Y** (or Ctrl+Shift+Z) redo, the
+Other controls: **R** toggles the playfield register guide (see *PF regions*
+under Playfield layers), **Ctrl+Z** undo, **Ctrl+Y** (or Ctrl+Shift+Z) redo, the
 **Zoom** slider or **Ctrl + mouse wheel** to zoom, and checkboxes for
 group lines (every 8 pixels) and row lines.
 
@@ -133,12 +134,18 @@ The active playfield layer's settings appear under its row:
     exact) the switch lands 1-2 pixels late. The preview shows that, as the
     TV would.
 
-**PF regions** (checkbox in the top bar, on by default) marks which register
-shows which blocks: a red **PF0**, green **PF1** and blue **PF2** strip across
-the top few scanlines of a Screen layer, or of a World layer's selected camera
-view. It follows the layer's type: Asymmetric (and World) shows PF0 PF1 PF2
-then PF0R PF1R PF2R; Repeat shows PF0 PF1 PF2 twice; Mirror shows the right
-half reversed, PF2 PF1 PF0. It's only a guide - not saved or exported.
+**PF regions** marks which register shows which blocks: a red **PF0**, green
+**PF1** and blue **PF2** strip across the top few scanlines of a Screen layer,
+or of a World layer's selected camera view. It follows the layer's type:
+Asymmetric (and World) shows PF0 PF1 PF2 then PF0R PF1R PF2R; Repeat shows
+PF0 PF1 PF2 twice; Mirror shows the right half reversed, PF2 PF1 PF0. It's
+only a guide - not saved or exported.
+
+- Turn it on and off with the **PF regions** checkbox in the top bar, or
+  press **R** (not while typing in a field).
+- It starts **off**, and the editor remembers your choice in this browser,
+  so it stays the way you left it after a reload. (Another browser or
+  computer has its own setting.)
 
 #### Camera views (World layers)
 
