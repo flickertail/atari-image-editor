@@ -223,10 +223,26 @@ your existing layers staying exactly where they are. The whole import is one
 - Set size in pixels, bold/italic, and the X/Y position. Text is a single ink
   color, so it always converts cleanly.
 
+## Projects and tabs
+
+Every open project has its own **tab** above the canvas, so you can work on
+several at once. **New Canvas** and **Load Project** each open a new tab -
+nothing already open is replaced. Click a tab to switch to it, and its **×**
+(or a middle-click) to close it.
+
+- Each tab keeps its own layers, undo/redo history, selection, palette
+  (NTSC/PAL/SECAM), zoom and scroll position.
+- **Copy** in one tab and **Paste** in another to move pixels between
+  projects (the paste becomes a new layer there).
+- A **dot** before a tab's name means it has unsaved changes. Closing such a
+  tab - or the browser page while any tab has one - asks first.
+- Closing the last tab opens a fresh blank one.
+
 ## Saving and exporting
 
 - **Save Project** / **Load Project** round-trip the full editor state
-  (all layers) as a `.json` file.
+  (all layers) of a tab as a `.json` file. Saving names the tab after the
+  file; a loaded project's tab is named after its file.
 - **Export .h** generates a C header from all layers or one layer. Use
   **Copy** or **Download .h**.
 

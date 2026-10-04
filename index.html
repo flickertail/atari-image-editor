@@ -3,15 +3,15 @@
 <head>
 <meta charset="UTF-8">
 <title>Atari 2600 Image Editor</title>
-<link rel="stylesheet" href="css/style.css?v=6">
+<link rel="stylesheet" href="css/style.css?v=8">
 </head>
 <body>
 <div id="topbar">
     <span class="brand">Atari 2600 Image Editor</span>
-    <button id="btnNew">New Canvas</button>
+    <button id="btnNew" title="Start a new project in its own tab">New Canvas</button>
     <button id="btnResize" title="Make the canvas wider/narrower or taller/shorter, keeping all layers' content">Resize Canvas</button>
     <button id="btnSaveProject">Save Project</button>
-    <button id="btnLoadProject">Load Project</button>
+    <button id="btnLoadProject" title="Open a saved project in its own tab">Load Project</button>
     <input type="file" id="loadProjectFile" accept=".json" style="display:none;">
     <button id="btnImportLayers" title="Copy layers from another saved project into this one">Import Layers</button>
     <input type="file" id="importLayersFile" accept=".json" style="display:none;">
@@ -30,6 +30,8 @@
     <label><input id="chkRowLines" type="checkbox"> row lines</label>
     <span id="docInfo" class="docInfo"></span>
 </div>
+
+<div id="tabBar" role="tablist" aria-label="Open projects"></div>
 
 <div id="main">
     <div id="leftPanel">
@@ -221,8 +223,8 @@
 <script src="js/imageImport.js?v=3"></script>
 <script src="js/textTool.js?v=2"></script>
 <script src="js/fontDetect.js?v=1"></script>
-<script src="js/exportC.js?v=3"></script>
+<script src="js/exportC.js?v=4"></script>
 <script src="js/markdown.js?v=2"></script>
-<script src="js/app.js?v=20"></script>
+<script src="js/app.js?v=23"></script>
 </body>
 </html>

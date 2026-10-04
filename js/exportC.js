@@ -158,6 +158,13 @@ const ExportC = {
     // copy, no linker collisions.
     toHeader(scopeName, body) {
         const guard = this.sanitizeIdent(scopeName).toUpperCase() + "_H";
-        return `#ifndef ${guard}\n#define ${guard}\n\n#include <stdint.h>\n\n${body}\n\n#endif // ${guard}\n`;
+        return `#ifndef ${guard}\n#define ${guard}\n\n#include <stdint.h>\n\n${this.noTrailingCommas(body)}\n\n#endif // ${guard}\n`;
+    },
+
+    // Drops the comma after the last element of every initializer list
+    // ("...,\n}" or "..., // comment\n}"). Legal C either way, but some tools
+    // that read these headers don't accept it.
+    noTrailingCommas(text) {
+        return text.replace(/,([ \t]*(?:\/\/[^\n]*)?\n[ \t]*\})/g, "$1");
     },
 };

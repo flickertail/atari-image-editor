@@ -30,16 +30,19 @@ async function saveTextFileAs(content, suggestedName, mimeType, extension, descr
             const writable = await handle.createWritable();
             await writable.write(content);
             await writable.close();
+            return handle.name;
         } catch (err) {
             if (err.name !== "AbortError") throw err;
+            return null;
         }
-        return;
     }
     const blob = new Blob([content], { type: mimeType });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = suggestedName;
     a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 0);
+    return suggestedName;
     URL.revokeObjectURL(a.href);
 }
 
@@ -51,6 +54,7 @@ const History = {
 
     // Call BEFORE mutating `doc` - snapshots the pre-change state.
     snapshotBeforeChange() {
+        markActiveTabDirty();
         this.undoStack.push(Doc.clone(doc));
         if (this.undoStack.length > this.MAX) this.undoStack.shift();
         this.redoStack.length = 0;
@@ -61,6 +65,7 @@ const History = {
         if (this.undoStack.length === 0) return;
         this.redoStack.push(Doc.clone(doc));
         doc = this.undoStack.pop();
+        markActiveTabDirty();
         grid.setDoc(doc);
         renderLayerList();
         redraw();
@@ -71,6 +76,7 @@ const History = {
         if (this.redoStack.length === 0) return;
         this.undoStack.push(Doc.clone(doc));
         doc = this.redoStack.pop();
+        markActiveTabDirty();
         grid.setDoc(doc);
         renderLayerList();
         redraw();
@@ -83,14 +89,141 @@ const History = {
     },
 };
 
+// True while the keyboard is on a text/number field or dropdown the user can
+// see - the shortcut keys leave those alone. A field inside a CLOSED dialog
+// doesn't count: closing a dialog can leave focus on one of its hidden
+// fields, which would otherwise swallow Ctrl+C/V/Z until the next click.
+function typingInField() {
+    const el = document.activeElement;
+    if (!el || !["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName)) return false;
+    const dlg = el.closest("dialog");
+    return !dlg || dlg.open;
+}
+
+// ---------- project tabs ----------
+// Each open project is a tab with its own document, undo/redo history,
+// selection, palette, zoom and scroll position. The active tab's state lives
+// in the usual globals (doc, History's stacks, selection); switching tabs
+// stores them back into the tab being left and loads the other one's. New
+// Canvas and Load Project open new tabs; the clipboard is shared, so Copy in
+// one project and Paste in another works.
+const Tabs = { list: [], active: -1, untitled: 0 };
+
+function newUntitledName() {
+    Tabs.untitled++;
+    return "Untitled " + Tabs.untitled;
+}
+
+function storeActiveTab() {
+    const t = Tabs.list[Tabs.active];
+    if (!t) return;
+    t.doc = doc;
+    t.undo = History.undoStack;
+    t.redo = History.redoStack;
+    t.selection = selection;
+    t.palette = Palette.mode;
+    t.zoom = grid.cellH;
+    t.scrollLeft = $("canvasArea").scrollLeft;
+    t.scrollTop = $("canvasArea").scrollTop;
+}
+
+function activateTab(i) {
+    if (i !== Tabs.active) storeActiveTab();
+    Tabs.active = i;
+    const t = Tabs.list[i];
+    doc = t.doc;
+    History.undoStack = t.undo;
+    History.redoStack = t.redo;
+    selection = t.selection;
+    if (t.palette !== Palette.mode) setPaletteMode(t.palette);
+    grid.setDoc(doc);
+    grid.setZoom(t.zoom);
+    $("zoomRange").value = grid.cellH;
+    History.updateButtons();
+    updateClipboardButtons();
+    renderLayerList();
+    redraw();
+    $("canvasArea").scrollLeft = t.scrollLeft;
+    $("canvasArea").scrollTop = t.scrollTop;
+    renderTabs();
+}
+
+function openTab(newDoc, title, palette) {
+    storeActiveTab();
+    Tabs.list.push({
+        doc: newDoc, title, palette: palette || Palette.mode, undo: [], redo: [], selection: null,
+        dirty: false, zoom: grid ? grid.cellH : 8, scrollLeft: 0, scrollTop: 0,
+    });
+    Tabs.active = -1;   // nothing to store on the way in - the tab being left was stored above
+    activateTab(Tabs.list.length - 1);
+}
+
+function closeTab(i) {
+    const t = Tabs.list[i];
+    if (t.dirty && !confirm(`"${t.title}" has unsaved changes. Close it anyway?`)) return;
+    if (i === Tabs.active) {
+        Tabs.list.splice(i, 1);
+        Tabs.active = -1;
+        if (Tabs.list.length === 0) { openTab(createDocument(6, 64), newUntitledName(), "NTSC"); return; }
+        activateTab(Math.min(i, Tabs.list.length - 1));
+    } else {
+        storeActiveTab();
+        Tabs.list.splice(i, 1);
+        if (i < Tabs.active) Tabs.active--;
+        renderTabs();
+    }
+}
+
+function markActiveTabDirty() {
+    const t = Tabs.list[Tabs.active];
+    if (t && !t.dirty) { t.dirty = true; renderTabs(); }
+}
+
+function renderTabs() {
+    const bar = $("tabBar");
+    bar.innerHTML = "";
+    Tabs.list.forEach((t, i) => {
+        const tab = document.createElement("div");
+        tab.className = "projTab" + (i === Tabs.active ? " active" : "");
+        tab.title = t.title + (t.dirty ? " (unsaved changes)" : "");
+        tab.addEventListener("mousedown", (e) => { if (e.button === 0 && i !== Tabs.active) activateTab(i); });
+        tab.addEventListener("auxclick", (e) => { if (e.button === 1) { e.preventDefault(); closeTab(i); } });  // middle-click closes
+        const name = document.createElement("span");
+        name.className = "projTabName";
+        name.textContent = (t.dirty ? "\u25CF " : "") + t.title;
+        const x = document.createElement("button");
+        x.className = "projTabClose";
+        x.textContent = "\u2715";
+        x.title = "Close this project";
+        x.addEventListener("mousedown", (e) => e.stopPropagation());
+        x.addEventListener("click", (e) => { e.stopPropagation(); closeTab(i); });
+        tab.append(name, x);
+        bar.appendChild(tab);
+    });
+}
+
+function setupTabs() {
+    // A closed dialog can leave keyboard focus on one of its (now hidden)
+    // fields, and the shortcut handlers ignore keys while a field has focus -
+    // so Ctrl+C/V/Z would silently do nothing until the next click.
+    for (const dlg of document.querySelectorAll("dialog")) {
+        dlg.addEventListener("close", () => {
+            if (dlg.contains(document.activeElement)) document.activeElement.blur();
+        });
+    }
+    window.addEventListener("beforeunload", (e) => {
+        storeActiveTab();
+        if (Tabs.list.some((t) => t.dirty)) { e.preventDefault(); e.returnValue = ""; }
+    });
+}
+
 function setupHistory() {
     $("btnUndo").addEventListener("click", () => History.undo());
     $("btnRedo").addEventListener("click", () => History.redo());
     History.updateButtons();
 
     window.addEventListener("keydown", (e) => {
-        const tag = document.activeElement && document.activeElement.tagName;
-        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+        if (typingInField()) return;
         if (document.querySelector("dialog[open]")) return;
         const ctrlOrCmd = e.ctrlKey || e.metaKey;
         if (!ctrlOrCmd) return;
@@ -160,8 +293,7 @@ function drawSelection() {
 function setupMoveNudge() {
     window.addEventListener("keydown", (e) => {
         if (currentTool !== "move") return;
-        const tag = document.activeElement && document.activeElement.tagName;
-        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+        if (typingInField()) return;
         if (document.querySelector("dialog[open]")) return;
 
         let dxPixels = 0, dyRows = 0;
@@ -215,8 +347,7 @@ function setViewPoint(layer, x, y) {
 function setupCameraKeys() {
     window.addEventListener("keydown", (e) => {
         if (currentTool !== "camera") return;
-        const tag = document.activeElement && document.activeElement.tagName;
-        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+        if (typingInField()) return;
         if (document.querySelector("dialog[open]")) return;
         const layer = activeWorldLayer();
         if (!layer) return;
@@ -714,9 +845,14 @@ function renderRawGridPreview(canvasEl, widthBytes, heightRows, colorGrid, maskG
 function setupProjectFile() {
     $("btnSaveProject").addEventListener("click", () => {
         const json = JSON.stringify(Object.assign({ palette: Palette.mode }, Doc.toPlainObject(doc)), null, 1);
-        const baseName = (doc.layers[0] && doc.layers[0].name) || "atari_image";
-        const suggestedName = baseName.replace(/[^a-z0-9_]+/gi, "_") + ".json";
-        saveTextFileAs(json, suggestedName, "application/json", ".json", "Atari Image Project");
+        const tab = Tabs.list[Tabs.active];
+        const suggestedName = tab.title.replace(/[^a-z0-9_]+/gi, "_") + ".json";
+        saveTextFileAs(json, suggestedName, "application/json", ".json", "Atari Image Project").then((savedAs) => {
+            if (!savedAs) return;   // cancelled
+            tab.title = savedAs.replace(/\.json$/i, "");
+            tab.dirty = false;
+            renderTabs();
+        });
     });
 
     $("btnLoadProject").addEventListener("click", () => $("loadProjectFile").click());
@@ -724,17 +860,14 @@ function setupProjectFile() {
         const file = e.target.files[0];
         if (!file) return;
         const text = await file.text();
+        e.target.value = "";
         let data;
         try { data = JSON.parse(text); } catch (err) { alert("Not a valid project file: " + err.message); return; }
-        History.snapshotBeforeChange();
-        doc = Doc.fromPlainObject(data);
-        grid.setDoc(doc);
-        // Projects saved before PAL/SECAM existed have no palette field and
-        // were NTSC-only.
-        setPaletteMode(data.palette || "NTSC");
-        renderLayerList();
-        redraw();
-        e.target.value = "";
+        const problem = Doc.checkProjectData(data);
+        if (problem) { alert(problem); return; }
+        // Opens in its own tab. Projects saved before PAL/SECAM existed have
+        // no palette field and were NTSC-only.
+        openTab(Doc.fromPlainObject(data), file.name.replace(/\.json$/i, ""), data.palette || "NTSC");
     });
 }
 
@@ -880,12 +1013,8 @@ function setupNewDialog() {
     $("newCreate").addEventListener("click", () => {
         const wb = Math.max(1, Math.min(MAX_WIDTH_BYTES, Number($("newWidthBytes").value) || 6));
         const hr = Math.max(1, Math.min(MAX_HEIGHT_ROWS, Number($("newHeightRows").value) || 64));
-        History.snapshotBeforeChange();
-        doc = createDocument(wb, hr);
-        grid.setDoc(doc);
-        renderLayerList();
-        redraw();
         dlg.close();
+        openTab(createDocument(wb, hr), newUntitledName(), Palette.mode);
     });
 }
 
@@ -1236,6 +1365,8 @@ function main() {
     setupTextDialog();
     setupExportDialog();
     setupLayerPanel();
+    setupTabs();
+    openTab(doc, newUntitledName(), Palette.mode);
     setupHistory();
     setupClipboard();
     setupMoveNudge();

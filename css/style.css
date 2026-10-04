@@ -4,6 +4,7 @@ html, body {
     background: #1e1e1e; color: #ddd;
     font: 13px/1.4 "Segoe UI", sans-serif;
 }
+body { display: flex; flex-direction: column; }
 button {
     background: #3a3a3a; color: #ddd; border: 1px solid #555;
     border-radius: 3px; padding: 4px 8px; cursor: pointer;
@@ -27,7 +28,23 @@ input[type=text], input[type=number], select {
 #topbar label { display: flex; align-items: center; gap: 4px; font-size: 12px; }
 .docInfo { font-size: 12px; color: #999; }
 
-#main { display: flex; height: calc(100vh - 40px); }
+#main { display: flex; flex: 1; min-height: 0; }
+
+/* One tab per open project */
+#tabBar {
+    display: flex; align-items: flex-end; gap: 2px; padding: 4px 8px 0; background: #1b1b1b;
+    border-bottom: 1px solid #3a8f5f; overflow-x: auto; flex-shrink: 0;
+}
+.projTab {
+    display: flex; align-items: center; gap: 6px; padding: 4px 6px 4px 10px; max-width: 220px;
+    background: #2b2b2b; border: 1px solid #444; border-bottom: none; border-radius: 4px 4px 0 0;
+    color: #aaa; cursor: pointer; user-select: none; flex-shrink: 0;
+}
+.projTab:hover { background: #333; }
+.projTab.active { background: #2f3f34; border-color: #3a8f5f; color: #eee; }
+.projTabName { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.projTabClose { padding: 0 5px; font-size: 11px; line-height: 16px; background: transparent; border-color: transparent; }
+.projTabClose:hover { background: #a33; border-color: #a33; color: #fff; }
 
 #leftPanel, #rightPanel {
     width: 220px; flex-shrink: 0; background: #232323;
@@ -63,11 +80,16 @@ input[type=text], input[type=number], select {
 }
 #paletteGrid .cell.selected { outline: 2px solid #fff; outline-offset: -2px; }
 
+/* The canvas is centred with auto margins, not justify-content: centring a
+   flex item that's wider than its scroll container pushes half the overflow
+   off the LEFT edge, where the scrollbar can't reach. Auto margins centre it
+   only while it fits, and go to 0 once it doesn't. */
 #canvasArea {
-    flex: 1; overflow: auto; display: flex; align-items: flex-start; justify-content: center;
+    flex: 1; overflow: auto; display: flex; align-items: flex-start; justify-content: flex-start;
     padding: 20px; background: #151515;
 }
-#gridCanvas { background: #000; image-rendering: pixelated; box-shadow: 0 0 0 1px #444; cursor: crosshair; }
+#gridCanvas { background: #000; image-rendering: pixelated; box-shadow: 0 0 0 1px #444; cursor: crosshair;
+    margin: 0 auto; flex-shrink: 0; }
 
 #layerList { display: flex; flex-direction: column; gap: 4px; }
 .layerRow {
